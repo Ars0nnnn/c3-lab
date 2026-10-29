@@ -1,0 +1,13 @@
+# c3-lab 全局 clangd 配置（对所有子目录生效，越近的 .clangd 优先级越高）
+#
+# Remove  : 丢掉主机 clang 不认识的目标相关 flag（-f* -m*），避免刷屏报错
+# Add     : 补 GCC 内部 include 目录 —— float.h / stddef.h / stdbool.h 住在这里，
+#           compile_commands.json 里没有，--query-driver 也拿不到，必须手工补。
+#           ⚠️ 路径含工具链版本号，IDF 升级后要改（症状：满屏 "float.h file not found"）
+CompileFlags:
+    Remove:
+        - -f*
+        - -m*
+    Add:
+        - -isystem
+        - C:/Espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/15.2.0/include

@@ -25,10 +25,10 @@
 
 static const char *TAG = "bringup";
 
-/* 只列出 IDF 5.x 各版本都存在的型号，避免因版本差异编译不过 */
 static const char *chip_model_name(esp_chip_model_t model)
 {
-    switch (model) {
+    switch (model)
+    {
     case CHIP_ESP32:
         return "ESP32";
     case CHIP_ESP32S2:
@@ -69,7 +69,8 @@ void app_main(void)
     ESP_LOGI(TAG, "==============================================");
 
     uint32_t sec = 0;
-    while (true) {
+    while (true)
+    {
         vTaskDelay(pdMS_TO_TICKS(1000));
         sec++;
         ESP_LOGI(TAG, "alive %" PRIu32 "s | heap free=%" PRIu32 " B | heap min-ever=%" PRIu32 " B",

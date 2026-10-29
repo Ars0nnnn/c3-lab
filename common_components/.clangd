@@ -1,0 +1,33 @@
+# common_components —— 纯头文件目录，没有自己的 build/，也不在 compile_commands.json 里。
+# 所以这里把"编译器本来会自己加"的 include 目录全部硬编码，让 clangd 能独立解析。
+# ⚠️ 下面路径含工具链版本号（esp-15.2.0_20251204 / 15.2.0），IDF 或工具链升级后要改。
+#    症状：满屏 "<cstdint> file not found" 或 "float.h file not found"。
+CompileFlags:
+    Add:
+        # --- 目标三元组：不写会按 x86_64 解析，uintptr_t 变成 64 位 ---
+        - -target
+        - xtensa-esp-unknown-elf
+        # --- C++ 标准库（Libstdc++ / picolibc） ---
+        - -isystem
+        - C:/Espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/xtensa-esp-elf/include/c++/15.2.0
+        - -isystem
+        - C:/Espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/xtensa-esp-elf/include/c++/15.2.0/xtensa-esp-elf/esp32s3
+        - -isystem
+        - C:/Espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/picolibc/include
+        - -isystem
+        - C:/Espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/xtensa-esp-elf/include
+        - -isystem
+        - C:/Espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/15.2.0/include
+        - -isystem
+        - C:/Espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/15.2.0/include-fixed
+        # --- 本仓库组件（等价于组件的 INCLUDE_DIRS） ---
+        - -I
+        - E:/c3-lab/common_components/c3lab_mmio/include
+        - -I
+        - E:/c3-lab/common_components/c3lab_gpio/include
+        - -I
+        - E:/c3-lab/10_drivers/gpio_driver/build/config
+        # --- 语言模式（对齐 IDF：gnu++26 / 无异常 / 无 RTTI） ---
+        - -std=gnu++26
+        - -fno-exceptions
+        - -fno-rtti

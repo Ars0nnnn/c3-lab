@@ -1,0 +1,2 @@
+# 本工程的编译数据库（clangd 只认这一个入口，--compile-commands-dir 多根时不够用）
+CompilationDatabase: build

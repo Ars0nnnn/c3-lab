@@ -1,0 +1,9 @@
+# Wokwi Configuration File
+# Reference: https://docs.wokwi.com/vscode/project-config
+[wokwi]
+version = 1
+firmware = 'build/flasher_args.json'
+elf = 'build/c3_lab_bringup.elf'
+gdbServerPort = 3333
+#env:WOKWI_CLI_TOKEN="wok_q2zv8cgLUovhazd9ZxAUxJ0HtjuF3aOee2456252" 
+#C:\Users\arson\.wokwi\bin\wokwi-cli.exe 
