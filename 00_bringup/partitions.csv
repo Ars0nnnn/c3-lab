@@ -1,0 +1,42 @@
+# ESP32-C3 / 4MB Flash 分区表（D6 产出）
+# -----------------------------------------------------------------------------
+# 列定义：Name, Type, SubType, Offset, Size, Flags
+#   - Offset 可留空，由工具自动累加
+#   - Size 支持 K/M 后缀，这里统一写十六进制，方便核对算术
+#
+# ⚠️ 关于本表的两个工程决策（D6 要求你能复述并重算）：
+#
+#   决策 1：没有 factory 分区，只有 ota_0 / ota_1
+#     原因：4MB 装不下 factory + ota_0 + ota_1 三份 app。
+#           无 factory 时，bootloader 默认启动第一个 OTA 分区；
+#           `idf.py flash` 也会写入 ota_0，行为与 factory 一致。
+#           代价：无法“一键回出厂版本”，需要靠 otadata 回滚。
+#
+#   决策 2：storage 只有 512KB，model 只有 384KB
+#     原因：双 OTA 各 1.5MB 已经吃掉 3MB。这是 4MB 板上做 OTA + 端侧模型的
+#           真实取舍 —— 也正是 D59（体积优化）存在的理由。
+#
+# -----------------------------------------------------------------------------
+# 算术核对（合计必须 == 0x400000 == 4MB）：
+#
+#   0x001000  bootloader                 （由构建系统固定）
+#   0x008000  partition-table  0x1000
+#   0x009000  nvs              0x4000    → 16 KB    配置 / 掉电计数 / 配网信息
+#   0x00D000  otadata          0x2000    →  8 KB    OTA 启动选择与回滚
+#   0x00F000  phy_init         0x1000    →  4 KB    RF 校准
+#   0x010000  ota_0            0x180000  → 1.5 MB    当前固件
+#   0x190000  ota_1            0x180000  → 1.5 MB    OTA 目标
+#   0x310000  storage          0x80000   → 512 KB    LittleFS：日志 / 断网缓存
+#   0x390000  model            0x60000   → 384 KB    INT8 模型（mmap 直读，D71）
+#   0x3F0000  coredump         0x10000   →  64 KB    崩溃现场（D60）
+#   0x400000  ← 正好到 4MB 末尾
+# -----------------------------------------------------------------------------
+# Name,     Type, SubType,   Offset,   Size,     Flags
+nvs,        data, nvs,       0x9000,   0x4000,
+otadata,    data, ota,       0xD000,   0x2000,
+phy_init,   data, phy,       0xF000,   0x1000,
+ota_0,      app,  ota_0,     0x10000,  0x180000,
+ota_1,      app,  ota_1,     0x190000, 0x180000,
+storage,    data, spiffs,    0x310000, 0x80000,
+model,      data, 0x40,      0x390000, 0x60000,
+coredump,   data, coredump,  0x3F0000, 0x10000,
