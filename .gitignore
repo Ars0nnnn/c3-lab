@@ -1,0 +1,45 @@
+# ---- ESP-IDF 生成物 ----
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock.bak
+
+# ---- 编译产物 ----
+*.bin
+*.elf
+*.map
+*.su
+*.o
+*.a
+*.d
+
+# ---- 工具 / 编辑器 ----
+.vscode/
+.idea/
+*.swp
+*.code-workspace
+
+# ---- Python（pc_train / tools） ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# ---- 数据集与模型：体积大，用 Git LFS 或本地保存 ----
+50_tinyml/**/dataset/
+50_tinyml/**/*.csv
+50_tinyml/**/*.wav
+50_tinyml/**/*.tflite
+50_tinyml/**/*.h5
+50_tinyml/**/*.keras
+
+# ---- 日志与临时测量文件 ----
+*.log
+*.pcap
+*.sal
+*.sr
+
+# ---- 但保留 notes 里的 Markdown 与关键截图 ----
+!notes/**

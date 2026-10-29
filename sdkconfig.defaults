@@ -1,0 +1,106 @@
+# =============================================================================
+# c3-lab 工程基线配置（D1 产出 / D3 验收）
+# -----------------------------------------------------------------------------
+# 用法：
+#   · 本文件是“可复现基线”。删掉 sdkconfig 与 build/ 后重新 build，
+#     生成的 sdkconfig 应当与上次逐行一致 —— 这就是 D3 的验收标准。
+#   · 只在这里写“项目级默认值”。个人口味/临时实验请用 menuconfig 改，
+#     确认要固化了再搬回本文件。
+#   · 注意：`# CONFIG_FOO is not set` 在 sdkconfig.defaults 里是**有效指令**
+#     （会显式关闭该项），不要用它当注释。
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 0. 目标芯片 —— 写在这里，`idf.py build` 就会自动识别为 esp32c3，
+#    省掉第一步 set-target，也避免误编译到别的目标。
+# -----------------------------------------------------------------------------
+CONFIG_IDF_TARGET="esp32c3"
+
+# -----------------------------------------------------------------------------
+# 1. Console 重定向（D3 核心）⚠️
+#    ESP32-C3 自带 USB Serial/JTAG 外设。默认走 UART0，插 USB 口是看不到日志的。
+#    改为 USB Serial/JTAG 后，一根 USB-C 线就能烧录 + 看日志，不需要 USB-TTL。
+#    代价：USB 拔掉后日志彻底消失（UART0 仍有输出，但没有第二路 console）。
+# -----------------------------------------------------------------------------
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# -----------------------------------------------------------------------------
+# 2. Flash（4MB 板子）
+#    分区表的紧约束就来自这里：见 00_bringup/partitions.csv 的算术说明
+# -----------------------------------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# 烧录前自动复位（C3 内置 USB-JTAG 支持自动复位，不需要手按 BOOT）
+CONFIG_ESPTOOLPY_BEFORE_RESET=y
+CONFIG_ESPTOOLPY_AFTER_RESET=y
+
+# -----------------------------------------------------------------------------
+# 3. 编译选项
+#    -Og：调试友好且仍保留优化，适合前 4 个阶段。
+#    注意：IDF 默认是 -Os（体积优先），D59 体积优化时会再改回来做对比。
+# -----------------------------------------------------------------------------
+CONFIG_COMPILER_OPTIMIZATION_DEBUG=y
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
+CONFIG_COMPILER_WARN_WRITE_STRINGS=y
+
+# -----------------------------------------------------------------------------
+# 4. 日志（D4 核心）⚠️
+#    LOG_DEFAULT_LEVEL = 运行时默认级别
+#    LOG_MAXIMUM_LEVEL = 编译期上限，决定 esp_log_level_set() 最高能开到几级
+#    只把 DEFAULT 设成 INFO 而不抬 MAXIMUM，D4 的“运行时动态开关”就会失效。
+# -----------------------------------------------------------------------------
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+CONFIG_LOG_COLORS=y
+
+# Bootloader 日志：D50 启动链分析时要靠它，先给到 INFO
+CONFIG_BOOTLOADER_LOG_LEVEL_INFO=y
+
+# -----------------------------------------------------------------------------
+# 5. 分区表（D6）
+#    自定义分区表是 OTA(D40) 与模型热更新(D71) 的前提。D6 的任务是自己重推
+#    一遍算术并验证，不是抄写。
+# -----------------------------------------------------------------------------
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# -----------------------------------------------------------------------------
+# 6. FreeRTOS
+#    100Hz tick = 10ms 调度粒度。D43 会实测这 10ms 对 1ms 周期任务意味着什么。
+#    故意不改，让学员先撞上这个问题。
+# -----------------------------------------------------------------------------
+CONFIG_FREERTOS_HZ=100
+
+# -----------------------------------------------------------------------------
+# 7. 主任务
+#    app_main 跑在 main_task 里，默认栈 3584B。D46 会用 water mark 反推它够不够。
+# -----------------------------------------------------------------------------
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
+
+# =============================================================================
+# 下面这些是“调试用开关”，按天手动打开，不要长期开着（会显著拖慢运行）：
+#
+#   D5  / D60 崩溃分析
+#     CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y        # panic 后停住不重启，方便看日志
+#     CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y       # 崩溃现场存 flash，可离线解析
+#     CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+#
+#   D22 / D46 内存问题
+#     CONFIG_HEAP_POISONING_COMPREHENSIVE=y        # 抓 use-after-free / 越界
+#     CONFIG_HEAP_TRACING_STANDALONE=y            # 记录每次 malloc 的调用栈
+#
+#   D24 / D48 看门狗与 JTAG 冲突
+#     CONFIG_ESP_INT_WDT=n                        # 单步调试时关中断看门狗，否则一停就复位
+#     CONFIG_ESP_TASK_WDT_EN=n
+#
+#   D50 启动链分析
+#     CONFIG_BOOTLOADER_LOG_LEVEL_VERBOSE=y
+#
+#   D57 Cache 分析
+#     CONFIG_SPIRAM_CACHE_WORKAROUND=n            # 仅 S3 有意义
+# =============================================================================

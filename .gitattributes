@@ -1,0 +1,18 @@
+# 统一换行符，避免 Windows/Linux 混合协作时的无意义 diff
+* text=auto eol=lf
+
+# Windows 脚本保留 CRLF（双击运行更友好）
+*.ps1    text eol=crlf
+*.bat    text eol=crlf
+*.cmd    text eol=crlf
+
+# 二进制/生成物
+*.bin    binary
+*.elf    binary
+*.tflite binary
+*.png    binary
+*.jpg    binary
+*.pdf    binary
+
+# 测量数据不做 diff
+*.csv    text eol=lf
