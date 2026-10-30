@@ -6,9 +6,7 @@
 //   1) 运行时引脚号：gpio::high(pin)              —— 引脚来自配置/参数
 //   2) 编译期引脚号：fixed_pin<10_pin>::high()    —— 热路径、零参数、可内联
 //   3) RAII：        gpio::scope_high g{10_pin};  —— 作用域结束自动拉低
-//
-// 全部 header-only + inline + noexcept：不产生额外 .o，-Og 下与手写寄存器同码。
-// 遵循 docs/CXX-STYLE.md：只用 <cstdint>，无 STL 容器、无异常、无 RTTI。
+
 #pragma once
 
 #include <cstdint>
@@ -191,7 +189,7 @@ inline void clear_intr(pin_id p) noexcept {
 // 是**不同类型的两个函数**， 谁也别想混用；所有地址都在编译期定死，可直接进
 // reg32<Addr> 模板。
 // ============================================================================
-template <pin_id P> struct fixed_pin {
+template <const pin_id P> struct fixed_pin {
   static constexpr std::uint8_t n = P.value();
   static constexpr std::uint32_t m = P.mask();
   static constexpr bool hi = P.high_bank();
@@ -227,6 +225,27 @@ template <pin_id P> struct fixed_pin {
       return (mmio::reg32<gpio_regs::in_reg()>::read() & m) != 0u;
     }
   }
+};
+
+template <std::size_t I, typename... Ts> struct nth_type;
+template <typename T, typename... Ts> struct nth_type<0, T, Ts...> {
+  using type = T;
+};
+template <std::size_t I, typename T, typename... Ts>
+struct nth_type<I, T, Ts...> : nth_type<I - 1, Ts...> {}; // 剥掉第一个再找 I-1
+
+template <typename... Ps> struct pin_list {
+
+  static constexpr std::size_t size = sizeof...(Ps);
+  // 取单个引脚：kBtnc::at<0> 就是 fixed_pin<4_pin>（I 必须是编译期常量）
+  template <std::size_t I> using at = typename nth_type<I, Ps...>::type;
+
+  static void high_all() noexcept { (Ps::high(), ...); } // C++17 折叠表达式
+  static void low_all() noexcept { (Ps::low(), ...); }
+  static void set_all(bool v) noexcept { (Ps::set(v), ...); }
+  [[nodiscard]] static bool all_level() noexcept {
+    return (... && Ps::level()); // 全部高才算高
+  };
 };
 
 } // namespace gpio

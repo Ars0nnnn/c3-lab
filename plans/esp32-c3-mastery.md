@@ -1,7 +1,9 @@
-# PLAN：ESP32-C3 从入门到精通 · 112 天
+# PLAN：ESP32-S3 + ESP32-CAM 从入门到精通 · 112 天
 
 > **周期** 16 周 = 112 天 · 每天 2h（≈224h） · 周一–周六任务日，周日复盘日
-> **硬件** C3（4MB Flash / 400KB SRAM / 无 PSRAM）为主，S3（双核 LX7 / 8MB PSRAM）仅 D85–D91、D88 视觉使用
+> **硬件（v2.0 修正）** **S3（N8R8：8MB Flash / 512KB SRAM / 8MB PSRAM / 双核 LX7 @240MHz / PIE+SIMD）是唯一主线板**；**ESP32-CAM（AI-Thinker：ESP32-S 双核 LX6 + OV2640 + PSRAM + microSD，无板载 USB 转串口）专用于摄像头与视觉链路（W3 末 + W13）**
+> **为什么改**：手上没有 C3，只有 S3 + ESP32-CAM。原版"单核 / 400KB / 无 PSRAM / 无 SIMD"的立论改为**S3 主线**；凡是需要"单核 / 无 PSRAM"对照的结论，用 `CONFIG_FREERTOS_UNICORE=y`、`CONFIG_SPIRAM=n` 现场编译同一份代码复现，不靠背结论。
+> **同时调整**：摄像头链路（原 D87–D88）**提前到 W3 的 D18–D19**；被挤出的 ADC 校准、三种定时器对决**整体后移，插到 W13 的 D87–D88**。
 > **起点** Arduino + STM32，无 RTOS / 无 IDF 经验
 > **记号** ★ 核心不可跳 · ☆ 延伸可推迟到周日 · ⚠️ 高频踩坑，当天必记 · 🎯 验收（**没有数据不算过**）
 > **每天 = 读 30m / 写 75m / 验 10m / 记 5m**：读到 3 个疑问再动手；代码手敲不整贴；验必须有测量；`notes/Dxxx.md` 写三行（卡点 / 根因 / 明日风险），次日开工先读。
@@ -15,12 +17,12 @@
 | 阶段 | 周 | 天 | 主题 | 阶段交付物 |
 |---|---|---|---|---|
 | **P0** 打通链路 | W1 | D1–D7 | 工具链、构建系统、烧录三件套、分区表、崩溃解析 | `00_bringup/` + 可复现 `sdkconfig.defaults` |
-| **P1** 驱动层 | W2–W4 | D8–D28 | GPIO/UART/I2C/SPI/ADC/PWM/RMT + **手写驱动** + 内存/低功耗/看门狗 | `common_components/`（5 个自写驱动）+ `node_v0.1` |
+| **P1** 驱动层 | W2–W4 | D8–D28 | GPIO/UART/I2C/SPI/PWM/RMT + **手写驱动** + **摄像头（OV2640/DVP/PSRAM）** + 内存（SRAM/PSRAM/块）/低功耗/看门狗 | `common_components/`（5 个自写驱动）+ `80_cam/` + `node_v0.1` |
 | **P2** 通信层 | W5–W6 | D29–D42 | WiFi/MQTT/HTTP/BLE/NVS/配网/OTA | `node_v1.0`（可配网 + 可 OTA 的联网节点） |
-| **P3** 系统层 | W7 | D43–D49 | FreeRTOS 调度/同步/优先级反转/栈/中断延迟 + JTAG | RTOS 实测数据报告 |
-| **P4** 底层架构 | W8–W9 | D50–D63 | 启动链、链接脚本、段布局、内存映射、异常向量、RISC-V 汇编、Cache、体积优化、coredump | `notes/arch-report.md`（10 页底层分析） |
-| **P5** TinyML | W10–W11 | D64–D77 | 采集→训练→INT8 量化→TFLite Micro→音频 KWS→ESP-SR→异常检测 | `50_tinyml/`（3 个模型 + 选型报告） |
-| **P6** 边缘计算 | W12–W13 | D78–D91 | **PID 闭环控制**、规则引擎、断网续传 + **S3 双核调度 / SMP / 视觉 / ESP-NOW / 异构卸载** | `60_edge/` + 异构架构文档 |
+| **P3** 系统层 | W7 | D43–D49 | FreeRTOS 调度（含**绑核**）/同步/优先级反转/栈/中断延迟 + JTAG | RTOS 实测数据报告 |
+| **P4** 底层架构 | W8–W9 | D50–D63 | 启动链（含 **CPU1 何时被拉起**）、链接脚本、段布局、内存映射、异常向量、**Xtensa 汇编**、Cache、体积优化、coredump | `notes/arch-report.md`（10 页底层分析） |
+| **P5** TinyML | W10–W11 | D64–D77 | 采集→训练→INT8 量化→TFLite Micro（**PIE/SIMD + PSRAM arena**）→音频 KWS→ESP-SR→异常检测 | `50_tinyml/`（3 个模型 + 选型报告） |
+| **P6** 边缘计算 | W12–W13 | D78–D91 | **PID 闭环控制**、规则引擎、断网续传 + **双核 SMP / 视觉分核 / ESP-NOW / 异构卸载**（+ W3 挤出的 ADC 校准、定时器对决回填） | `60_edge/` + 异构架构文档 |
 | **P7** 旗舰与求职 | W14–W16 | D92–D112 | 系统集成、可靠性加固、CI、文档、简历、八股、模拟面试 | `90_flagship/` 可演示系统 + 求职包 |
 
 > 详细版格式：**W1–W4（D1–D28）逐日展开**（前四周定工程骨架，颗粒度必须细）；**W5 起每行一天**，只保留主题 / 产出 / 验收。
@@ -35,7 +37,7 @@
 
 **D1 周一 · ★ 仓库与环境基线**
 - **读 30m**：IDF 快速入门 + 构建系统概览。只抓三层：`project.cmake` → 组件 `CMakeLists.txt` → 工具链；读完写 3 个疑问（`idf.py` 怎么找到组件？`sdkconfig` 从哪来？`build/` 里每个文件是谁生成的？）
-- **写 75m**：① `export.ps1` 固化 `IDF_PATH`/PATH，写进 PowerShell profile 或 `tools/env.ps1`；② `git init` + 用 `idf.py create-project` 生成的 `.gitignore`（必须含 `build/`、`sdkconfig`、`sdkconfig.old`、`managed_components/`；`dependencies.lock` 要提交）；③ `00_bringup/hello` → `set-target esp32c3`；④ `tools/flash.ps1 -Port COM5 [-Clean] [-Monitor]`，内部 = `idf.py build` + `flash` + `monitor`；⑤ `README.md` 只写版本、一条命令、排障三条。
+- **写 75m**：① `export.ps1` 固化 `IDF_PATH`/PATH，写进 PowerShell profile 或 `tools/env.ps1`；② `git init` + 用 `idf.py create-project` 生成的 `.gitignore`（必须含 `build/`、`sdkconfig`、`sdkconfig.old`、`managed_components/`；`dependencies.lock` 要提交）；③ `00_bringup/hello` → `set-target esp32s3`，并按 `sdkconfig.defaults` 把 8MB Flash / PSRAM 打开；④ `tools/flash.ps1 -Port COM5 [-Clean] [-Monitor]`，内部 = `idf.py build` + `flash` + `monitor`；⑤ `README.md` 只写版本、一条命令、排障三条。
 - **验 10m**：🎯 `idf.py --version` = v5.x；`git log` ≥3 个语义化 commit；`flash.ps1 -Port COM5` 首次即通
 - **坑**：Windows 上 PATH 里常有两套 `idf.py`/python，先 `where.exe idf.py` 确认唯一；`sdkconfig` 不进 git（否则跨机器 diff 爆炸）；`flash.ps1` 禁止硬编码 COM 口
 - **提交**：`chore: init repo + env` / `feat: sdkconfig.defaults + flash.ps1` / `docs: README quickstart`
@@ -49,10 +51,10 @@
 
 **D3 周三 · ★ menuconfig 与配置固化 ⚠️**
 - **读 30m**：Kconfig 机制 —— `Kconfig.projbuild` / `sdkconfig.defaults` / `sdkconfig` 三者关系，`CONFIG_` 前缀怎么进代码
-- **写 75m**：menuconfig 改五项：Console → **USB Serial/JTAG**、Flash 4MB@80MHz、优化 `-Og`、assert 开启、默认日志级 Info；`idf.py save-defconfig` 生成 `sdkconfig.defaults`，**手工删掉所有等于默认值的行**
+- **写 75m**：`idf.py set-target esp32s3`（全计划所有工程都这个 target），menuconfig 改五项：Console → **USB Serial/JTAG**、Flash **8MB**@80MHz QIO、优化 `-Og`、assert 开启、默认日志级 Info；`idf.py save-defconfig` 生成 `sdkconfig.defaults`，**手工删掉所有等于默认值的行**
 - **验 10m**：🎯 删 `sdkconfig` 重 build → `diff` 与旧 `sdkconfig` 逐行一致；USB 口直连 `idf.py monitor` 有日志
-- **坑**：Console 改成 USB-JTAG 后，若板子 USB 实际接 CH340 桥 → 直接"没日志"；menuconfig 改了但没落进 defaults 是全计划最大隐患；defaults 里写了默认值行，未来 IDF 升级必冲突
-- **提交**：`feat: sdkconfig.defaults (usb-jtag console, 4MB, -Og)`
+- **坑**：**S3 开发板有两个 USB-C（UART 口 / USB-OTG 口）**，Console 选了 USB-JTAG 就必须插标着 `USB` 的那个口，插错 = 直接"没日志"；menuconfig 改了但没落进 defaults 是全计划最大隐患；defaults 里写了默认值行，未来 IDF 升级必冲突
+- **提交**：`feat: sdkconfig.defaults (esp32s3, usb-jtag console, 8MB QIO, -Og)`
 
 **D4 周四 · 日志与错误处理**
 - **读 30m**：`esp_log.h`（等级、`LOG_LOCAL_LEVEL`（编译期）、`esp_log_level_set`（运行期））+ `esp_err.h`（`ESP_ERROR_CHECK` 展开成什么、`ESP_RETURN_ON_ERROR` 家族）
@@ -65,14 +67,14 @@
 - **读 30m**：Fatal Errors 文档 —— Guru Meditation 各行含义、Backtrace 怎么解、`idf.py monitor` 的自动解码
 - **写 75m**：一个工程 5 个 `#if CASE_x` 分支：① 空指针读 ② 函数指针跳垃圾地址 ③ 除零 ④ `assert` ⑤ 递归/大数组栈溢出
 - **验 10m**：🎯 每类都用 `addr2line -e build/*.elf 0x...` 定位到**自己源码行号**；`notes/D005` 存 5 段原始日志 + 解码结果
-- **坑**：**RISC-V 除零不 trap**（和 Cortex-M 的 UsageFault 不同），会静默返回，必须软件检查 —— 这条本身就是面试题；`-Og` 仍会内联，栈帧可能不准；release 无符号时 backtrace 无意义
+- **坑**：**Xtensa 的整数除零默认不 trap**（DIV0 异常默认关闭），会静默给出垃圾值 —— 这条必须当天实测验证一遍再写结论，它本身就是面试题；`-Og` 仍会内联，栈帧可能不准；release 无符号时 backtrace 无意义
 - **提交**：`feat: crash lab (5 cases)` + `docs: decode cheatsheet`
 
 **D6 周六 · ★ 自定义分区表**
 - **读 30m**：Partition Tables 文档 —— csv 字段、app 分区 64KB 对齐、`otadata` 两个扇区的用途、nvs 默认位置
-- **写 75m**：先算账再写 csv。4MB 的可用空间从 `0x20000` 起：三 app 各 `0xC0000` + storage `0x80000` + model `0xC0000` = `0x3A0000`，剩 `0x60000` 留白。落地 `partitions.csv`：`nvs 0x9000/0x6000` · `otadata 0xF000/0x2000` · `factory 0x20000/0xC0000` · `ota_0 0xE0000/0xC0000` · `ota_1 0x1A0000/0xC0000` · `storage 0x260000/0x80000` · `model 0x2E0000/0xC0000`；再写 `esp_partition_write/read` 往返 1KB
-- **验 10m**：🎯 `idf.py partition-table` 输出与 csv 逐行吻合；写后读回**字节一致**；断电重上电数据仍在
-- **坑**：4MB 装不下"三个 1M app + 1M storage + 1M model"，必须做减法 —— 这一天的真实功课是算账不是抄模板；app 分区非 64KB 对齐 build 直接报错；改了分区表必须 `erase_flash`，否则旧 nvs 残留
+- **写 75m**：先算账再写 csv。8MB = `0x800000`，app 分区必须 64KB 对齐：`nvs 0x9000/0x6000` · `otadata 0xF000/0x2000` · `ota_0 0x20000/0x180000` · `ota_1 0x1A0000/0x180000` · `storage 0x320000/0x100000` · `model 0x420000/0x300000`，剩 `0xE0000`（896KB）留白。落地 `partitions.csv` 后用 `esp_partition_write/read` 往返 1KB，再用 `esp_ota_get_next_update_partition` 确认双槽真的可用
+- **验 10m**：🎯 `idf.py partition-table` 输出与 csv 逐行吻合；写后读回**字节一致**；断电重上电数据仍在；`idf.py size` 里 app 占分区的百分比有数字
+- **坑**：8MB 也不是无限 —— model 给 3MB 是因为后面模型 / 字库 / Web 资源都往 Flash 里塞，**先按终局算一次再做减法**；app 分区非 64KB 对齐 build 直接报错；改了分区表必须 `erase_flash`，否则旧 nvs 残留
 - **提交**：`feat: custom partitions.csv (3 app slots + storage + model)`
 
 **D7 周日 · 复盘 + 博客 #1**
@@ -96,14 +98,14 @@
 - **读 30m**：LEDC 文档 —— 时钟源、`duty_resolution` 与 `freq` 的互斥关系、硬件 fade
 - **写 75m**：gamma 校正呼吸灯（查表）；扫 `freq∈{1k,5k,10k,20k,40k}` × `res∈{8..14}`，记录哪些组合 `ledc_timer_config` 失败；硬件 fade vs 软件循环渐变对比
 - **验 10m**：🎯 产出 `freq × max_res` 表并验证 `freq ≤ 80MHz/2^res`；示波器/逻辑分析仪测占空比误差
-- **坑**：14bit 时频率只剩 ~4.8kHz；C3 只有 6 通道；低占空比区非线性（LED 亮度 + 驱动），所以必须 gamma
+- **坑**：14bit 时频率只剩 ~4.8kHz；**S3 的 LEDC 是 8 通道 / 4 定时器**（同一 timer 上的通道必须同 freq+res，最常见的配置冲突来源；代码别硬编码通道数，用 `SOC_LEDC_CHANNEL_NUM`）；低占空比区非线性（LED 亮度 + 驱动），所以必须 gamma
 - **提交**：`feat: ledc pwm + gamma table + freq/res matrix`
 
 **D10 周三 · ★ UART 驱动与吞吐**
 - **读 30m**：`uart_driver` 事件队列模式、DMA 与 ring buffer 的关系、`tx_buffer_size` 语义
 - **写 75m**：`components/uart_pipe`：DMA 发送 + 中断接收环形缓冲 + 溢出计数 + 阻塞/非阻塞两套 API
 - **验 10m**：🎯 3Mbps 连续发 1MB **零丢包**（PC 侧算 CRC32 校验）；反向收 1MB 也零丢；吞吐 Mbps 数字入笔记
-- **坑**：UART0 默认是 console（D3 已迁到 USB-JTAG，这里才能复用）；DMA 描述符与 ring buffer 是两层，别重复缓冲
+- **坑**：UART0 默认是 console（D3 已迁到 USB-JTAG，这里才能复用）；**S3 上别把 USB-JTAG 口和 USB-OTG 口搞混**；DMA 描述符与 ring buffer 是两层，别重复缓冲
 - **提交**：`feat: uart_pipe (dma tx + isr rx ring)`
 
 **D11 周四 · ★ 串口协议设计 ⚠️**
@@ -133,7 +135,11 @@
 
 ---
 
-### W3 · D15–D21 ｜ P1 驱动层（二）显示 / SPI / RMT / ADC
+### W3 · D15–D21 ｜ P1 驱动层（二）显示 / SPI / RMT / 摄像头
+
+**周目标**：不再"调库"，而是"按手册写"，每个参数都有测量依据。
+
+> **v2.0 调整**：摄像头链路（原 D87–D88）**提前到 D18–D19** —— 摄像头 / PSRAM 是旗舰项目最容易卡住、也最容易被面试官追问的环节，越早暴露越好。原 D18「ADC 与校准」与原 D19「三种定时器对决」**后移到 W13（D87–D88）**，这两组测量的价值在"对照"，放到双核 + PSRAM 的环境里做更有说服力。D20 组件化、D21 复盘不动。
 
 **D15 周一 · ★ SSD1306 自写驱动 ⚠️**
 - **读 30m**：SSD1306 数据手册 —— 页寻址 vs 水平寻址、GDDRAM 结构、命令表
@@ -156,23 +162,23 @@
 - **坑**：WS2812 对中断延迟极敏感，只有硬件 RMT 才稳（软件 bit-bang 一定花）；RMT 内存块不够会静默卡住
 - **提交**：`components/ws2812` · `feat: ws2812 via rmt encoder`
 
-**D18 周四 · ★ ADC 与校准 ⚠️**
-- **读 30m**：ADC oneshot / continuous(DMA)、`adc_cali` 曲线拟合 vs 线性、衰减档与量程
-- **写 75m**：电位器 10 点测量（0.1–2.5V），出 raw / cali / 万用表三方对照表；再开 WiFi 复测 **ADC2**
-- **验 10m**：🎯 校准后误差 <2% FS；WiFi 开启时 ADC2 的行为有明确结论（可用 / 需关 WiFi / 完全不可用）
-- **坑**：**ADC2 与 WiFi 抢硬件**，这是 C3 的硬约束不是 bug；0dB 衰减量程仅 ~1.1V；oneshot 每次要重新 config
-- **提交**：`feat: adc cali benchmark + wifi/adc2 report`
+**D18 周四 · ★★ 摄像头链路 bring-up：ESP32-CAM + OV2640 ⚠️**
+- **读 30m**：`esp32-camera` 驱动 README + OV2640 数据手册 —— DVP 时序（PCLK / XCLK / VSYNC / HREF）、SCCB（就是 I2C，用来配 sensor 寄存器）、JPEG 与 RGB565 两条输出路径；**经典 ESP32 的 DVP 采集走 I2S 并口模式，S3 走 LCD_CAM，同一个 `esp32-camera` 组件两套后端**
+- **写 75m**：① 硬件前置：**这块板没有板载 USB 转串口**，用 3.3V USB-TTL 接 U0TXD/U0RXD/GND + 5V（独立供电更稳），**烧录时 GPIO0 接地再复位**，先 `esptool.py chip_id` 确认连得上；② 工程：`set-target esp32`、`idf_component.yml` 引 `espressif/esp32-camera`、确认 `CONFIG_SPIRAM=y`（帧缓存必须进 PSRAM）；③ 采一帧 JPEG → HTTP/串口回传 PC 存 `.jpg` 打开看；④ 打印帧的 `len/width/height` 与帧缓冲地址，确认落在 PSRAM
+- **验 10m**：🎯 PC 上真的打开一张自己拍的 JPEG（不是"串口有输出"）；`heap_caps_get_free_size(MALLOC_CAP_SPIRAM)` 前后差值与帧缓存大小对得上；`notes/D018` 画出**引脚占用表**
+- **坑**：摄像头吃掉 GPIO 0/5/18–27/32/34–39，PSRAM 还占 GPIO16/17，**能自由用的只剩 1/3/12/13/15（不插 SD 卡时）** —— 后面想加传感器先查这张表；GPIO0 既是 strapping 又接 XCLK，悬空会"能连上但全黑"；`fb_count=2` 才是双缓冲；供电不足表现为随机花屏与反复重启（先换 5V/2A 源再怀疑代码）
+- **提交**：`80_cam/cam_v1` · `feat: esp32-cam jpeg capture (psram frame buffers)`
 
-**D19 周五 · ★ 三种定时器对决**
-- **读 30m**：`esp_timer` / GPTimer / FreeRTOS Timer 的实现差异（中断 vs 任务上下文、精度、漂移）
-- **写 75m**：同一个 1kHz 周期任务三种实现各跑 10 万次，记录抖动分布；顺手落地 `prof` 雏形（min/均值/P99/max）
-- **验 10m**：🎯 抖动表 + "什么场景用哪个"的结论；量化 `configTICK_RATE_HZ=100` 对 1ms 任务的影响
-- **坑**：FreeRTOS timer 精度受 tick 限制（默认 10ms）；`esp_timer` 回调在中断上下文不能阻塞；`vTaskDelay(1)` 在 1kHz 需求下必然漂移
-- **提交**：`feat: timer shootout + jitter table`（`prof` 起点）
+**D19 周五 · ★★ 摄像头性能矩阵 + 第一次视觉推理 ⚠️**
+- **读 30m**：`esp32-camera` 的 sensor 配置项（分辨率 / `jpeg_quality` / `fb_location` / `grab_mode`）；视觉这条路怎么选：ESP-WHO 的 MTMN 人脸检测（经典 ESP32 + PSRAM 可跑）vs 自己训一个极小分类器接 D67 的量化流程
+- **写 75m**：① 扫 `QQVGA/QCIF/QVGA/CIF/VGA/SVGA` × `jpeg_quality 10/20/30` × `fb_count 1/2`，记帧率、PSRAM 峰值、单帧字节数；② `JPEG 解码后处理` vs `RGB565 直出` 的代价对比；③ 跑通一个人脸检测或小分类器：串口输出坐标/类别 + 单帧推理耗时，采集与推理耗时分开计
+- **验 10m**：🎯 一张 **分辨率 × 质量 × 帧率 × PSRAM 占用** 的矩阵表，明确标出"实时可用"的分辨率上限；采集耗时 vs 推理耗时占比有数字；`notes/D019` 存 3 张不同光照实拍 + 一张检测结果
+- **坑**：JPEG 解码往往比采集更贵；RGB565 的 VGA 单帧就 600KB，双缓冲直接吃 1.2MB PSRAM；光照一变阈值法就失效（这是算法问题，写进笔记而不是改代码猜）；**摄像头任务与 WiFi 抢 CPU**，帧率对半掉先查这里
+- **提交**：`feat: cam resolution/quality/fps matrix + first vision inference`
 
 **D20 周六 · ★ 组件化与单元测试 ⚠️**
 - **读 30m**：Component Manager、`idf_component.yml`、Unity、pytest-embedded
-- **写 75m**：把 D8–D17 的驱动全部搬进 `components/`（各带 `idf_component.yml` + `REQUIRES`/`PRIV_REQUIRES`），纯逻辑部分抽成可测函数，写 ≥8 个 Unity 单测
+- **写 75m**：把 D8–D19 的驱动全部搬进 `components/`（各带 `idf_component.yml` + `REQUIRES`/`PRIV_REQUIRES`），**摄像头封成 `components/cam_service`（init/capture/frame_info 三层接口，底层仍用 `esp32-camera`）**，纯逻辑部分抽成可测函数，写 ≥8 个 Unity 单测
 - **验 10m**：🎯 `idf.py -T` 单测全绿；`idf.py fullclean` 后仍可编；外部工程 path 依赖引用成功
 - **坑**：不抽纯函数就没法在 PC/linux target 测；`REQUIRES` 与 `PRIV_REQUIRES` 混用会把头文件泄漏到使用者
 - **提交**：`refactor: drivers → components + 8 unit tests (green)`
@@ -185,25 +191,25 @@
 
 ### W4 · D22–D28 ｜ P1 驱动层（三）内存 / 低功耗 / 可靠性 / 综合
 
-**D22 周一 · ★ 内存模型 ⚠️**
-- **读 30m**：Memory Types 文档 + `multi_heap` 分配算法
-- **写 75m**：`heap_caps_malloc` 全 CAP 组合矩阵实验（INTERNAL / DMA / IRAM8 / SPIRAM）；`IRAM_ATTR` 函数对比；故意复现 `MALLOC_CAP_DMA|INTERNAL` 失败
-- **验 10m**：🎯 分配矩阵表（哪个组合成功、落在哪个堆）；能解释"这个 buffer 为什么不能放外部 RAM"
-- **坑**：C3 **无 PSRAM**，所有 SPIRAM 相关 CAP 必然失败 —— 这些失败正是要记录的结论；IRAM 只留很小一块给代码
-- **提交**：`docs: memory cap matrix`
+**D22 周一 · ★ 内存模型：内部 SRAM / PSRAM / DMA ⚠️**
+- **读 30m**：Memory Types 文档 + `multi_heap` 分配算法 + S3 的 PSRAM 配置项（`CONFIG_SPIRAM_MODE_OCT/QUAD`、`CONFIG_SPIRAM_USE_MALLOC`、`CONFIG_SPIRAM_SPEED_*`）
+- **写 75m**：`heap_caps_malloc` 全 CAP 组合矩阵实验（INTERNAL / DMA / IRAM8 / SPIRAM / SPIRAM|8BIT）；同一份 100KB buffer 在内部 RAM 与 PSRAM 上各做一轮 memcpy/CRC，记录带宽与延迟；`IRAM_ATTR` 函数对比；最后用 `CONFIG_FREERTOS_UNICORE=y` 和 `CONFIG_SPIRAM=n` 各编一次，看同一份代码分别退化成什么样
+- **验 10m**：🎯 分配矩阵表（哪个组合成功、落在哪个堆、地址区间）；PSRAM vs 内部 RAM 的读写带宽与延迟数字；能回答"D18 的摄像头帧缓存为什么必须进 PSRAM、而 DMA 描述符为什么不能"
+- **坑**：PSRAM 走 cache，**外设 DMA 直接吐数据到 PSRAM 要么不支持、要么要 cache 对齐与手工回写**，这是 S3 上最容易出现的"偶发花屏/偶发丢字节"；`MALLOC_CAP_DMA` 默认不等于 PSRAM，写错不会报错只会偶发错；PSRAM 访问比内部 RAM 慢数倍，热点数据放进去等于自残
+- **提交**：`docs: memory cap matrix (sram / psram / dma)`
 
 **D23 周二 · ★ 低功耗实测 ⚠️**
 - **读 30m**：Sleep Modes 文档、RTC 定时唤醒、`ext0` GPIO 唤醒、power management 配置
 - **写 75m**：active / light sleep / deep sleep 三态各测 60s 平均电流；deep sleep + 定时唤醒 + GPIO 唤醒各跑一轮
 - **验 10m**：🎯 三态电流实测（USB 表 + 万用表交叉验证）；唤醒周期误差 <1%，并记录当时室温
-- **坑**：USB 供电+USB 表测不出真实 µA（表分辨率与桥芯片漏电）；deep sleep 时 GPIO 保持状态与上拉；RTC 精度随温度漂移，不记温度等于没数据
+- **坑**：USB 供电+USB 表测不出真实 µA（表分辨率 + 板载桥芯片漏电，S3 深睡是 µA 级，必须万用表串在电池/供电回路里测）；deep sleep 时 GPIO 保持状态与上拉；RTC 精度随温度漂移，不记温度等于没数据；S3 的 `CONFIG_PM_ENABLE` + DVFS 开不开，功耗能差一倍，同一份代码要在"开/关 PM"两种配置下各测一次
 - **提交**：`docs: sleep current measurements`
 
 **D24 周三 · ★ 看门狗**
 - **读 30m**：TWDT / INT_WDT / RTC_WDT 三者的监控对象与触发后果；panic 处理流程
 - **写 75m**：构造 5 类 WDT 场景：任务饿死、临界区过长、ISR 卡死、`vTaskDelay` 误用、flash 操作超时
 - **验 10m**：🎯 每类都能读懂 panic 信息（哪个任务没喂狗、卡在哪个函数）并写出修复
-- **坑**：TWDT 默认只监控 idle 任务，**不 `esp_task_wdt_add` 自己的任务等于没开**；ISR 卡死只能靠 INT_WDT
+- **坑**：TWDT 默认只监控 idle 任务，**不 `esp_task_wdt_add` 自己的任务等于没开**；S3 双核各有一个 idle 任务，喂狗覆盖不全会出现"一个核假死、系统还在跑"的诡异状态；ISR 卡死只能靠 INT_WDT
 - **提交**：`feat: wdt 5 cases + fixes`
 
 **D25 周四 · ★★ 综合工程：采集节点 v0.1**
@@ -217,7 +223,7 @@
 - **读 30m**：IDF 编码风格 + MISRA-C 关键规则清单
 - **写 75m**：按自查表过 `node_v01`：错误码、资源释放、超时、越界、整数溢出、`volatile`、魔数
 - **验 10m**：🎯 找出并修复 ≥10 个**真实**问题，记录 `notes/D026-review.md`
-- **坑**：自查最容易只验"能不能跑"，要找的是边界与失败路径；单核上 `volatile` 也不等于原子
+- **坑**：自查最容易只验"能不能跑"，要找的是边界与失败路径；双核上 `volatile` 更不等于原子（`volatile` 挡不住另一个核）
 - **提交**：`fix: 10 review findings`
 
 **D27 周六 · ☆ 硬件与测量基础**
@@ -263,17 +269,17 @@
 
 ### W7 · D43–D49 ｜ P3 系统层：FreeRTOS 内核
 
-**周目标**：把"我知道 RTOS"变成"我能用测量数据解释 RTOS 的每个行为"。
+**周目标**：把"我知道 RTOS"变成"我能用测量数据解释 RTOS 的每个行为"。**S3 是双核**，所以本周每个实验都要多问一句"这个结论在另一个核上还成立吗"：绑核、跨核唤醒、双核临界区先各留一个小实验，完整的 SMP 深挖放 D85。
 
 | 天 | 主题 | 产出 | 🎯 验收 |
 |---|---|---|---|
-| **D43** 周一 | ★ 任务与调度器 | 优先级抢占/轮转实验；`vTaskDelay` vs `vTaskDelayUntil` 抖动对比 | 抖动数据表；能解释 tick=100Hz 下 1ms 任务的命运 |
+| **D43** 周一 | ★ 任务与调度器（含绑核） | 优先级抢占/轮转实验；同一负载绑核 0 / 绑核 1 / 不绑各跑一遍；`vTaskDelay` vs `vTaskDelayUntil` 抖动对比 | 抖动数据表 + 三组绑核吞吐/延迟；能解释 tick=100Hz 下 1ms 任务的命运 |
 | **D44** 周二 | ★ 同步原语选型 | 同一生产者-消费者用队列 / 流缓冲 / 任务通知三种实现 | 吞吐与延迟对比表 → 选型规则（面试高频） |
 | **D45** 周三 | ★ 优先级反转 ⚠️ | 构造经典三任务反转，用带继承的 mutex 修复 | 修复前后最坏延迟数字（如 210ms → 300µs）+ 时序图 |
-| **D46** 周四 | ★ 堆与栈 ⚠️ | 4 个堆 region 分配走向；`uxTaskGetStackHighWaterMark` 反推最小栈；触发溢出 | 每任务栈大小**有实测依据**；能解释 `heap_caps` 与 `malloc` 关系 |
-| **D47** 周五 | ★ 中断与临界区 | GPIO 中断打点 + 逻辑分析仪测"中断→任务收到"延迟；改变临界区长度 | 中断延迟基线 + 临界区长度影响曲线 |
+| **D46** 周四 | ★ 堆与栈 ⚠️ | 内部 RAM 各 region + PSRAM region 的分配走向；`uxTaskGetStackHighWaterMark` 反推最小栈；触发溢出 | 每任务栈大小**有实测依据**；能解释 `heap_caps` 与 `malloc` 关系 |
+| **D47** 周五 | ★ 中断与临界区 | GPIO 中断打点 + 逻辑分析仪测"中断→任务收到"延迟；改变临界区长度；`esp_ipc_call` 让对方核在临界区内跑一段 | 中断延迟基线 + 临界区长度影响曲线 + 跨核延迟数字 |
 | **D48** 周六 | ★★ JTAG 源码级调试 ⚠️ | `idf.py openocd` + `idf.py gdb`；断点、watchpoint、看 `pxCurrentTCB` | 像调 PC 程序一样调固件；写清"打断点为什么会复位" |
-| **D49** 周日 | 复盘 + 博客 #7 | 《用数据说明白：ESP32-C3 上的 RTOS 调度与延迟》 | **阶段 Gate P3**：能用自测数据答 10 个 RTOS 面试题 |
+| **D49** 周日 | 复盘 + 博客 #7 | 《用数据说明白：ESP32-S3 上的 RTOS 调度、绑核与延迟》 | **阶段 Gate P3**：能用自测数据答 10 个 RTOS 面试题 |
 
 ---
 
@@ -283,13 +289,13 @@
 
 | 天 | 主题 | 产出 | 🎯 验收 |
 |---|---|---|---|
-| **D50** 周一 | ★★ 启动链全景 ⚠️ | 开 bootloader 详细日志，逐行标注；定位 eFuse/strap pin 判定分支 | 启动时序图（eFuse → ROM → 2nd boot → app） |
-| **D51** 周二 | ★★ app 启动细节 | 在 `call_start_cpu0`、`esp_startup_start_app`、`main_task` 插桩 | `app_main` 之前**函数级调用链 ≥12 层** |
-| **D52** 周三 | ★ 链接脚本与段布局 ⚠️ | `objdump -h/-t` 列出各段，对照 `.map`；预测新变量落段 | 连续 3 次预测段位置全中 |
+| **D50** 周一 | ★★ 启动链全景 ⚠️ | 开 bootloader 详细日志，逐行标注；定位 eFuse/strap pin 判定分支；**找出 CPU1 是哪一刻才被拉起来的**（ROM 与 2nd boot 全程只有 CPU0） | 启动时序图（eFuse → ROM → 2nd boot → app → CPU1 up） |
+| **D51** 周二 | ★★ app 启动细节 | 在 `call_start_cpu0`、`esp_startup_start_app`、`main_task` 插桩，并找出 `start_other_core` 拉起 CPU1 的那一行 | `app_main` 之前**函数级调用链 ≥12 层** + 双核启动时序 |
+| **D52** 周三 | ★ 链接脚本与段布局 ⚠️ | `xtensa-esp32s3-elf-objdump -h/-t` 列 `.iram0.text/.dram0.data/.flash.text/.flash.rodata` 等段，对照 `sections.ld.in`(esp32s3) 与 `.map`；预测新变量落段 | 连续 3 次预测段位置全中 |
 | **D53** 周四 | ★ 内存映射与 mmap ⚠️ | `esp_partition_mmap` 把 `model`/`storage` 分区映射后读取 | 打印映射地址窗口验证内容；解释"为什么能像内存一样读 Flash" |
-| **D54** 周五 | ★ 异常与中断向量 | 注册 GPIO/UART/Timer 三类中断；读 `mtvec/mcause/mepc/mstatus` | 故意触发异常后能靠 `mcause` 判类型并手写解析 |
-| **D55** 周六 | ★ RISC-V 汇编与周期计数 | 手写汇编版 `memcpy` 或 CRC16；`csrr mcycle/minstret` 做 `prof` | 汇编版比 C 版快且有周期数据；能读反汇编 |
-| **D56** 周日 | 复盘 + 博客 #8 | 《ESP32-C3 从上电到 app_main：一条链走完》 | 博客含自己画的调用链图 |
+| **D54** 周五 | ★ 异常与中断向量 | 注册 GPIO/UART/Timer 三类中断；用 `rsr` 读 `EXCCAUSE / EPC / EXCVADDR / PS` 等 Xtensa 专用寄存器 | 故意触发异常后能靠 `EXCCAUSE` 判类型并手写解析 |
+| **D55** 周六 | ★ Xtensa 汇编与周期计数 | 手写汇编版 `memcpy` 或 CRC16（先搞清 windowed ABI 与 call0 的寄存器约定）；用 `rsr CCOUNT` 做 `prof` | 汇编版比 C 版快且有周期数据；能读 Xtensa 反汇编 |
+| **D56** 周日 | 复盘 + 博客 #8 | 《ESP32-S3 从上电到 app_main：一条链走完，顺带拉起第二个核》 | 博客含自己画的调用链图 + 双核启动时序 |
 
 ---
 
@@ -297,7 +303,7 @@
 
 | 天 | 主题 | 产出 | 🎯 验收 |
 |---|---|---|---|
-| **D57** 周一 | ★ Cache 与 Flash 执行 ⚠️ | 热点函数加/不加 `IRAM_ATTR` 的 `mcycle` 对比；查 TRM 确认 cache 容量/路数 | 提升百分比 + "中断处理为什么要放 IRAM"的解释 |
+| **D57** 周一 | ★ Cache 与 Flash 执行 ⚠️ | 热点函数加/不加 `IRAM_ATTR` 的 `CCOUNT` 周期对比；查 TRM 确认 cache 容量/路数与 **PSRAM 是否也走 cache** | 提升百分比 + "中断处理为什么要放 IRAM"的解释 |
 | **D58** 周二 | ★ 性能测量方法论 | 完善 `prof`：区间计时、P50/P99 分布、跨任务统计 | 能给任意函数出耗时分布图 |
 | **D59** 周三 | 二进制体积优化 | `idf.py size-*` 家族逐项裁剪：日志级别、`-Os`、LTO、关组件 | app 体积缩小 ≥15% 且功能不变（附对比表） |
 | **D60** 周四 | ★ 崩溃现场还原 ⚠️ | coredump 存 flash 分区；构造崩溃后离线解析调用栈与关键变量 | 从一次真实崩溃还原任务名 + 调用栈 + 寄存器 |
@@ -309,17 +315,17 @@
 
 ### W10 · D64–D70 ｜ P5 TinyML（一）数据 → 训练 → 量化 → 部署
 
-**周目标**：把"我会 PyTorch"变成"我能让 400KB SRAM 的单片机实时跑神经网络"。
+**周目标**：把"我会 PyTorch"变成"我能让一颗 240MHz 双核 + 8MB PSRAM 的 MCU 实时跑神经网络，并且说清哪一部分性能是 PIE/SIMD 挣来的、哪一部分是 PSRAM 带宽舍不得的"。
 
 | 天 | 主题 | 产出 | 🎯 验收 |
 |---|---|---|---|
-| **D64** 周一 | ★★ 数据集采集 ⚠️ | C3 以 100Hz 采 MPU6050；5 类动作 × 50 次，含静止/噪声负样本 | 数据集 v1 + 采集协议、标签规则、已知偏差写明 |
+| **D64** 周一 | ★★ 数据集采集 ⚠️ | S3 以 100Hz 采 MPU6050；5 类动作 × 50 次，含静止/噪声负样本 | 数据集 v1 + 采集协议、标签规则、已知偏差写明 |
 | **D65** 周二 | ★ 预处理与特征 | `preprocess.py`：滑窗重叠切分、归一化、时域+频域特征 | 特征图显示类别可分 |
 | **D66** 周三 | ★ PC 训练 | `train.py`：小 CNN/DSCNN + 混淆矩阵 + 交叉验证 | 验证集准确率 ≥90%；参数量 <30K |
-| **D67** 周四 | ★ INT8 量化 ⚠️ | FP32 vs full-integer INT8 对比（精度/大小/tensor 类型） | 精度下降 <3%，体积 ≤40KB，输入输出均 int8 |
-| **D68** 周五 | ★★ 部署到 C3 ⚠️ | 模型转 C 数组 → `MicroInterpreter` → op resolver 裁剪 → arena 调参 | `50_tinyml/gesture` 板上实时推理，端到端 <100ms |
-| **D69** 周六 | ★ 性能调优 | 二分法定 arena 上限；裁 op；`esp-nn` 开关对比（C3 无 PIE，预期收益有限） | 性能基线表：延迟 / arena / CPU / 内存峰值 |
-| **D70** 周日 | 复盘 + 博客 #10 | 《从 CSV 到 INT8：在 400KB SRAM 里塞进一个神经网络》 | 博客含完整流水线图与踩坑清单 |
+| **D67** 周四 | ★ INT8 量化 ⚠️ | FP32 vs full-integer INT8 对比（精度/大小/tensor 类型） | 精度下降 <3%，体积 ≤128KB（S3 有 PSRAM 放 arena，模型能比 C3 宽松一档），输入输出均 int8 |
+| **D68** 周五 | ★★ 部署到 S3 ⚠️ | 模型转 C 数组 / 直接 mmap 分区 → `MicroInterpreter` → op resolver 裁剪 → arena 先放内部 RAM 再试 PSRAM | `50_tinyml/gesture` 板上实时推理，端到端 <50ms（S3 有 PIE/SIMD，目标比 C3 高一档） |
+| **D69** 周六 | ★ 性能调优 | 二分法定 arena 上限；裁 op；`esp-nn` 开关对比（**S3 有 128 位 PIE/SIMD，加速是真加速，必须量化**）；arena 放内部 RAM vs PSRAM 的延迟差 | 性能基线表：延迟 / arena / CPU / 内存峰值 |
+| **D70** 周日 | 复盘 + 博客 #10 | 《从 CSV 到 INT8：双核 240MHz + PIE 上跑神经网络，PSRAM 帮了多少忙》 | 博客含完整流水线图与踩坑清单 |
 
 ---
 
@@ -330,49 +336,52 @@
 | **D71** 周一 | ★ 模型进分区 + mmap ⚠️ | 模型放 `model` 分区，mmap 直喂 interpreter，支持 OTA 换模型 | **不重新烧 app** 就能换模型并生效 |
 | **D72** 周二 | ★ 音频链路 I2S + INMP441 ⚠️ | 24bit 采集 → 降采样 16kHz → 存 WAV / 串口回传 | PC 播放清晰无爆音；采样率误差 <1% |
 | **D73** 周三 | ★★ 自训 KWS | MFCC + 小 CNN，3 类（开灯/关灯/噪声），复跑 D68 流水线 | `50_tinyml/kws` 现场 10 次识别 ≥8 次正确 |
-| **D74** 周四 | ★ ESP-SR 官方方案 ⚠️ | 跑通唤醒词例程 → 接业务逻辑（唤醒后开灯/上报） | 1 小时内唤醒次数/误唤醒次数都有记录 |
+| **D74** 周四 | ★ ESP-SR 官方方案 ⚠️ | 跑通唤醒词例程 → 接业务逻辑（唤醒后开灯/上报）；**S3 用满血 WakeNet，不必退回 C3 的 WakeNet9s 降本版** | 1 小时内唤醒次数/误唤醒次数都有记录 |
 | **D75** 周五 | ★ 异常检测（无监督） | 自编码器或统计阈值法，输出异常分数 + 报警 | 注入异常能报警，误报率有数据 |
 | **D76** 周六 | ★★ 三模型横向选型 | 手势/关键词/异常在**精度-延迟-内存-功耗**四维对比 | `notes/tinyml-selection.md`：能回答"什么任务用哪种方案" |
-| **D77** 周日 | 复盘 + 博客 #11 | 《ESP32-C3 到底能跑多大的模型：实测边界》 | **阶段 Gate P5**：3 个模型板载可跑 + 有边界结论 |
+| **D77** 周日 | 复盘 + 博客 #11 | 《ESP32-S3 到底能跑多大的模型：PSRAM、PIE 与 cache 的真实边界》 | **阶段 Gate P5**：3 个模型板载可跑 + 有边界结论 |
 
 ---
 
 ### W12 · D78–D84 ｜ P6 边缘计算（一）PID 闭环控制 + 规则 / 离线
 
-**周目标**：把闭环从头到尾坐实。PID 公式三行就写完，难的是**定时抖动让 D 项变放大器、积分饱和让系统开机冲顶、传感器噪声让你以为 Kd 没用**。本周复用 D19（定时抖动）、D47（中断延迟）、D55（周期计数）的全部测量结果。
+**周目标**：把闭环从头到尾坐实。PID 公式三行就写完，难的是**定时抖动让 D 项变放大器、积分饱和让系统开机冲顶、传感器噪声让你以为 Kd 没用**。本周复用 D47（中断延迟）与 D55（周期计数）的测量方法；原 D19「三种定时器对决」已后移到 D88，所以控制周期的抖动基线改在 **D79 / D81 现场自测**——反正控制回路本身就是最好的抖动测量对象。
 
 | 天 | 主题 | 产出 | 🎯 验收 |
 |---|---|---|---|
-| **D78** 周一 | ★★ 闭环硬件搭建与开环辨识 ⚠️ | 温控回路（加热片 + MOS + NTC + 限温开关）；0/25/50/75/100% PWM 开环阶跃；离线拟合**一阶惯性 + 滞后**参数 | 🔥 先接限温开关与保险丝再上电。拿到升温斜率、最大温升、时间常数 τ |
-| **D79** 周二 | ★ PID 离散化实现 | `pid` 组件：位置式 + 增量式、抗积分饱和（clamp/back-calculation）、不完全微分、输出限幅；float vs 定点 Q15 用 `mcycle` 对比 | 两版都能跑；定点版更快且有数字；纯算法部分有单测 |
+| **D78** 周一 | ★★ 闭环硬件搭建与开环辨识 ⚠️ | 温控回路（加热片 + MOS + NTC + 限温开关）；NTC 先用 `adc_oneshot` + `adc_cali` 拿到 ±0.5℃ 够用的读数（完整 ADC 校准研究在 D87）；0/25/50/75/100% PWM 开环阶跃；离线拟合**一阶惯性 + 滞后**参数 | 🔥 先接限温开关与保险丝再上电。拿到升温斜率、最大温升、时间常数 τ |
+| **D79** 周二 | ★ PID 离散化实现 | `pid` 组件：位置式 + 增量式、抗积分饱和（clamp/back-calculation）、不完全微分、输出限幅；float vs 定点 Q15 用 D55 的 `rsr CCOUNT` 周期计数对比 | 两版都能跑；定点版更快且有数字；纯算法部分有单测 |
 | **D80** 周三 | ★★ 整定与闭环实测 ⚠️ | 开环数据离线仿真出初值 → 上板 Z-N / 手动整定 → 测超调/上升时间/调节时间/稳态误差/振荡次数；☆ WebSocket 实时曲线 + 在线改参 | 三组参数对比表 + 曲线；终版超调 <10%、稳态误差 <1%、无持续振荡 |
 | **D81** 周四 | ★★ PID 在 MCU 上的真实问题 ⚠️ | 四组破坏实验：① `vTaskDelay` vs `Until` ② 微分滤波有无 ③ 关抗饱和看冲顶 ④ 回路内插 5ms 阻塞；☆ 换电机转速环重复 | `notes/pid-mcu.md`：每种劣化都有曲线 + 数据；讲清"为什么 PI 够用还要 D" |
 | **D82** 周五 | ★ 规则引擎 + 消息总线 | JSON 规则存 NVS（`if 温度>30 且持续60s then 报警`）+ 去抖 + 事件抑制；`bus` 组件（订阅/异步分发/背压） | 改规则**不重启**即生效；新增模块**不改老代码** |
 | **D83** 周六 | ★★ 断网续传 + 时间对齐 ⚠️ | LittleFS 环形日志 + 断网缓存 + 恢复补传 + 幂等去重；UTC + 单调 tick + 漂移补偿 | 断网 30min 数据一条不丢不重；两节点时间对齐误差 <50ms |
-| **D84** 周日 | 复盘 + 博客 #12 | 《PID 不难，难的是它跑在一颗 160MHz 单核上》 | **阶段 Gate**：闭环连续稳定 ≥2h 无振荡无冲顶；博客含三组整定曲线 |
+| **D84** 周日 | 复盘 + 博客 #12 | 《PID 不难，难的是它跑在一颗 240MHz 双核、还要和别的任务抢 CPU 的芯片上》 | **阶段 Gate**：闭环连续稳定 ≥2h 无振荡无冲顶；博客含三组整定曲线 |
 
 ---
 
-### W13 · D85–D91 ｜ P6 边缘计算（二）异构：双核调度 / SMP / 视觉 / 卸载
+### W13 · D85–D91 ｜ P6 边缘计算（二）双核 / SMP / 视觉分核 / 卸载 + 回填
 
-**周目标**：C3 是单核，**双核调度必须在 S3 上练**。本周同时回答两个面试必问：「SMP 下怎么保证临界区安全」「什么时候该把任务挪到另一端」。
+**周目标**：S3 是双核，**会不会用第二个核**是这一周的分水岭；同时把 W3 挤出来的两个测量（ADC 校准、三种定时器对决）在这里补齐。本周要回答的面试必问题：「SMP 下你怎么保证临界区安全」「什么时候该把任务从一端挪到另一端」。
 
 | 天 | 主题 | 产出 | 🎯 验收 |
 |---|---|---|---|
-| **D85** 周一 | ★ S3 上手与单/双核差异 | 同一份代码 `set-target esp32s3` 直接编过 | **一套组件两款芯片**都能编能跑；列出"哪些代码在 C3 上是死路" |
-| **D86** 周二 | ★★ 双核调度与 SMP ⚠️ | `smp_probe`：① 绑核/不绑的吞吐延迟 ② 跨核 `portENTER_CRITICAL(&mux)` 复现数据竞争并修复 ③ `esp_ipc_call` ④ 测跨核唤醒延迟 | 单核 vs 双核加速比数字；竞争 bug 复现日志 + 修复前后差异 |
-| **D87** 周三 | ★ PSRAM + 摄像头流水线 ⚠️ | 大 buffer 内部 RAM vs PSRAM 带宽延迟对比；采集 JPEG 扫分辨率/帧率/内存（帧缓存必须进 PSRAM） | 内存分层表 + "什么放 PSRAM"规则 + 帧率数据（如 QVGA 25fps） |
-| **D88** 周四 | ★★ 视觉推理：单核做不动 → 双核分工 | ESP-DL 人脸检测 + 串口输出坐标；采集搬一个核、推理搬另一个核，对比单核基线 | `85_s3/face` 实测 ≥5fps；双核分工相较单核的加速比有数字 |
-| **D89** 周五 | ★ 异构通信：ESP-NOW ⚠️ | C3↔S3 双向传输：ACK、重传、丢包统计、RSSI 记录 | 丢包率 / 延迟数据表 |
-| **D90** 周六 | ★★ 异构计算：任务卸载设计 | 同一推理任务三方案：C3 本地 / 卸载到 S3 / 上传云端；测端到端延迟、电量、准确率、断网可用性；写入**端云数据分级**判据、架构图、数据契约、降级路径 | `notes/offload-design.md`：四维对比表 + "何时卸载"判定树；接口/超时/降级全定义 |
+| **D85** 周一 | ★★ 双核调度与 SMP ⚠️ | `smp_probe`：① 绑核/不绑的吞吐延迟（D43 小实验的升级版）② 跨核 `portENTER_CRITICAL(&mux)` 复现数据竞争并修复 ③ `esp_ipc_call` ④ 跨核唤醒延迟 ⑤ `CONFIG_FREERTOS_UNICORE=y` 对照 | 单核 vs 双核加速比数字；竞争 bug 复现日志 + 修复前后差异 |
+| **D86** 周二 | ★★ 视觉流水线拆核（采集 ↔ 推理） | 把 D19 的采集 + 推理拆到 ESP32-CAM 的两个核（核 0 采集、核 1 推理），与 D19 的单核基线逐项对比；测每核 CPU 占用与队列深度 | 拆核后帧率提升百分比；能说清"哪一段真能并行、哪一段拆了反而更慢" |
+| **D87** 周三 | ★ ADC 与校准（原 D18 回填）⚠️ | 电位器 10 点测量（0.1–2.5V）出 raw / cali / 万用表三方对照表；ADC1 vs ADC2 对比；开 WiFi 复测 | 校准后误差 <2% FS；WiFi 开启时 ADC 的行为有明确结论（可用 / 需避让 / 精度掉多少） |
+| **D88** 周四 | ★ 三种定时器对决（原 D19 回填）⚠️ | 同一 1kHz 周期任务用 `esp_timer` / GPTimer / FreeRTOS Timer 各跑 10 万次，记录抖动分布；绑核与不绑各一轮 | 抖动表（均值/P99/最坏）+ "什么场景用哪个"的结论；`prof` 的 P50/P99 能力在这里补齐 |
+| **D89** 周五 | ★ 异构通信：ESP-NOW ⚠️ | S3 ↔ ESP32-CAM 双向传输：ACK、重传、丢包统计、RSSI 记录；CAM 侧上报一帧缩略图 + 检测结果 | 丢包率 / 延迟数据表 |
+| **D90** 周六 | ★★ 异构计算：任务卸载设计 | 同一推理任务三方案：S3 本地 / 卸载到 CAM / 上传云端；测端到端延迟、电量、准确率、断网可用性；写入**端云数据分级**判据、架构图、数据契约、降级路径 | `notes/offload-design.md`：四维对比表 + "何时卸载"判定树；接口/超时/降级全定义 |
 | **D91** 周日 | 复盘 + 博客 #13 | 《SMP 与异构卸载：双核不是把活分两半》 | **阶段 Gate P6**：两板稳定互通 ≥1h；能脱稿讲清自旋锁/绑核/卸载决策 |
+
+> **v2.0 说明**：原 D85「S3 上手」删除（S3 现在是主线板，从 D1 就在用）；原 D87「PSRAM + 摄像头流水线」拆成两半 —— PSRAM 归 D22 内存模型、摄像头归 D18–D19；原 D88 的视觉推理基线已在 D19 建立，这里只做"拆核 vs 不拆核"的对比。空出来的两天由 D87/D88 回填。
+
 
 ---
 
 ### W14 · D92–D98 ｜ P7 旗舰项目集成
 
 **旗舰项目**：**「低功耗多节点环境感知与声控边缘系统」**
-C3 传感节点（SHT30 + MPU6050 + 麦克风 + TinyML + deep sleep + ESP-NOW）→ C3/S3 网关（聚合 + 规则 + MQTT + OTA + Web 配置）→ PC 端 mosquitto + InfluxDB + Grafana。
+**ESP32-CAM 视觉/传感节点**（OV2640 + SHT30/MPU6050 + 麦克风 + TinyML + deep sleep + ESP-NOW）→ **S3 网关 + 本地推理**（聚合 + 规则 + MQTT + OTA + Web 配置）→ PC 端 mosquitto + InfluxDB + Grafana。
 
 | 天 | 主题 | 产出 | 🎯 验收 |
 |---|---|---|---|
@@ -397,7 +406,7 @@ C3 传感节点（SHT30 + MPU6050 + 麦克风 + TinyML + deep sleep + ESP-NOW）
 | **D101** 周三 | ★ 简历项目提炼 | STAR 写 3 条：①底层架构分析 ②TinyML 落地 ③可靠性设计 | 每条都有**可量化指标**（如"中断延迟 12µs → 3.2µs"） |
 | **D102** 周四 | ★ 高频八股整理 | 100 题：C 语言 / RTOS / 驱动 / 总线协议 / 网络 / 底层 → `notes/interview.md` | 自测答出 ≥80% |
 | **D103** 周五 | ★ 手写代码训练 | 环形缓冲、位图、状态机、CRC、链表反转、`memcpy` 优化、字符串库 | 无编译警告 + 边界用例全过 |
-| **D104** 周六 | ★★ 模拟面试与演示 | 录 10min 项目演示；自问自答 20 问（为什么用 C3 不用 S3？为什么不用 RTOS 的 xxx？） | 3 分钟内讲清架构与关键取舍 |
+| **D104** 周六 | ★★ 模拟面试与演示 | 录 10min 项目演示；自问自答 20 问（为什么 S3 当主线、ESP32-CAM 专做视觉？为什么不直接上 Linux？为什么不用 RTOS 的 xxx？） | 3 分钟内讲清架构与关键取舍 |
 | **D105** 周日 | 复盘 + 博客 #15 | 《从学习到可入职：我给自己的验收标准》 | **求职 Gate**：博客公开发布 ≥8 篇 |
 
 ---
@@ -424,3 +433,27 @@ idf.py --version                    # 期望 v5.x
 where.exe idf.py                    # 期望只有一处
 New-Item -ItemType Directory E:\c3-lab -Force; cd E:\c3-lab; git init
 ```
+
+**两块板各自的烧录方式（别混）**
+
+| 板 | target | 烧录 | 备注 |
+|---|---|---|---|
+| ESP32-S3-DevKitC（主线） | `esp32s3` | 板载 USB 口直接 `idf.py flash monitor` | 两个 USB-C：一个 UART、一个 USB-OTG，Console 必须与实际插的口一致 |
+| ESP32-CAM（摄像头） | `esp32` | **3.3V USB-TTL** 接 U0TXD/U0RXD/GND，**GPIO0 接地后复位进下载模式** | 无板载转串口芯片；供电要 5V/2A 独立，掉电会表现为随机花屏 |
+
+---
+
+## 附：v2.0 变更记录（改了什么、为什么）
+
+| # | 变更 | 原因 |
+|---|---|---|
+| 1 | **基线由 C3 改为 S3**（8MB Flash / 512KB SRAM / 8MB PSRAM / 双核 LX7 / PIE+SIMD） | 手上没有 C3；原计划大量"无 PSRAM / 单核 / 无 SIMD"的立论必须换 |
+| 2 | **摄像头链路提前**：D87–D88 → **D18–D19**（W3 末） | 摄像头是最容易卡住、面试最常追问的环节，越早暴露越好；且它天然属于驱动层（DVP/SCCB/PSRAM/DMA） |
+| 3 | **ADC 校准、三种定时器对决后移**：D18–D19 → **W13 的 D87–D88** | 这两组测量的价值在"对照"，放到双核 + PSRAM 环境下更有说服力 |
+| 4 | 原 D85「S3 上手」删除 | S3 成了主线板，从 D1 就在用，不需要"上手日" |
+| 5 | 原 D87「PSRAM + 摄像头流水线」拆解 | PSRAM 归 D22 内存模型；摄像头归 D18–D19；"拆核对比"归 D86 |
+| 6 | 分区表按 8MB 重算 | 原 4MB 算账已失效；新的双 OTA + storage 1MB + model 3MB 布局见 D6 |
+| 7 | P4 全面换架构：RISC-V → **Xtensa LX7**（`EXCCAUSE/EPC`、`rsr CCOUNT`、windowed ABI、`sections.ld.in`(esp32s3)） | 芯片换了，汇编/异常/链接脚本的每一行都会变 |
+| 8 | TinyML 约束放宽：arena 可进 PSRAM、模型上限 40KB → 128KB、`esp-nn` 从"收益有限"变"必须量化" | S3 有 8MB PSRAM 与 128 位 PIE/SIMD |
+| 9 | W7 加入绑核/跨核小实验，SMP 深挖集中在 D85 | 双核是主线板的第一性事实，不该等到第 13 周才提 |
+| 10 | 旗舰项目改为 **CAM 节点 + S3 网关** | 与手上的板子一致，且真实产品就是这种异构分工 |

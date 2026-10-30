@@ -1,9 +1,9 @@
-# PLAN：ESP32-C3 从入门到精通 · 112 天逐日计划
+# PLAN：ESP32-S3 + ESP32-CAM 从入门到精通 · 112 天逐日计划
 
-> 版本 v1.0 · 待批注
+> 版本 **v2.0**（v1.0 是 C3 版；因手上实际只有 S3 与 ESP32-CAM 而改基线）
 > 目标岗位：**嵌入式软件工程师**（固件方向）
 > 总周期：**16 周 = 112 天**，每天 **2 小时**（总工时 ≈ 224h）
-> 硬件：ESP32-C3 主板 + 传感器套件 + 一块 ESP32-S3（8MB PSRAM）
+> 硬件：**ESP32-S3-DevKitC（N8R8，8MB Flash + 8MB PSRAM，双核 LX7）为主线** + **ESP32-CAM（OV2640）做摄像头/视觉** + 3.3V USB-TTL（CAM 烧录用）
 > 起点：Arduino / STM32 经验，无 RTOS / 无 IDF 经验
 
 ---
@@ -18,7 +18,7 @@
 | 驱动 | Arduino 调库 | **能读数据手册手写驱动**，逻辑分析仪验证时序 |
 | RTOS | 概念听过 | 能讲清调度/同步/优先级反转，并用测量数据证明 |
 | 底层 | 黑盒 | 讲清 ROM→bootloader→app_main 全链路，读链接脚本与 map |
-| AI | 会用 PyTorch 跑 demo | C3 上完整 TinyML 流水线，且说清能力边界 |
+| AI | 会用 PyTorch 跑 demo | S3 上完整 TinyML 流水线（含 PSRAM arena / PIE 加速），且说清能力边界 |
 | 调试 | print 大法 | JTAG 源码级调试 + coredump 现场还原 + 周期计数 profiling |
 | 求职 | 无作品 | 1 个可演示多节点系统 + 16 篇技术博客 + 可量化简历项 |
 
@@ -26,23 +26,24 @@
 
 | 约束 | 数值 | 计划中的后果 |
 |---|---|---|
-| CPU | 单核 RISC-V **RV32IMC** @160MHz | **C3 无 SMP**：核相关代码在这颗芯片上永不触发 → C3 的实时性只能靠优先级/中断；**双核调度放到 S3（D86）** |
-| **CPU(S3)** | **双核 Xtensa LX7** + PSRAM + PIE/SIMD | 双核调度、SMP 锁、视觉、异构卸载的落点 → 见 W13 |
-| SRAM | **400KB，无 PSRAM** | Tensor arena 上限 ~100–150KB；模型必须 INT8 且 ≤40KB 才安全 |
-| Flash | 典型 **4MB** | 分区表是硬约束：双 OTA 分区后单 app 只有 ~1.2MB |
-| SIMD | **无 PIE / 无 AI 指令** | `esp-nn` 在 C3 上无加速；推理延迟靠裁剪模型，不靠指令 |
-| 无线 | WiFi4 + **BLE5 (LE only)** | 无 BT Classic；BLE Mesh / ESP-NOW 可用 |
-| 串口 | 内置 USB Serial/JTAG | 省 USB-TTL，但 Console 重定向必须配置，否则"没日志" |
+| **CPU** | **双核 Xtensa LX7 @240MHz**（S3） | SMP 可用：绑核、自旋锁、跨核 IPC 都是真实验（D85），不是纸上谈兵 |
+| **SRAM** | **512KB 内部 SRAM** | 内部 RAM 依然稀缺：DMA 缓冲、中断栈、热点数据优先放这里（D22） |
+| **PSRAM** | **8MB 八线 PSRAM（N8R8）** | 摄像头帧缓存、模型 arena、大 buffer 都靠它；但它**走 cache**，DMA 直通有限制（D22） |
+| **Flash** | **8MB** | 分区表能宽松排：双 OTA 各 1.5MB + storage 1MB + model 3MB（D6） |
+| **SIMD** | **128 位 PIE / SIMD** | `esp-nn` 真加速 → 推理延迟靠"裁模型 + 用指令"两条腿（D69 必须量化） |
+| **无线** | WiFi4 + **BLE5 (LE only)** | 无 BT Classic；BLE Mesh / ESP-NOW 可用（D89 用 ESP-NOW 连 CAM） |
+| **串口** | 板载 **USB-Serial-JTAG + USB-OTG 两个口** | Console 必须指向实际插的那个 USB 口，否则"没日志"（D3） |
+| **副板 ESP32-CAM** | ESP32-S 双核 LX6 + OV2640 + PSRAM + microSD，**无板载 USB 转串口** | 摄像头链路用 3.3V USB-TTL + GPIO0 接地烧录；引脚被摄像头/PSRAM/SD 吃掉大半（D18） |
 
 ### 1.3 关键事实裁决（决定了 AI 阶段怎么走）
 
 | 事实 | 来源 | 计划含义 |
 |---|---|---|
-| `WakeNet9s` / `WakeNet10s` **明确支持 ESP32-C3**（免 PSRAM、免 SIMD 的降本版） | ESP-SR 组件 README | 唤醒词/命令词在 C3 本机可跑 → 保留为 D74 |
-| ESP-DL 文档虽列 C3，但注记"仅适用于无需 PSRAM 的应用"，2.x 实际主攻 S3/P4 | ESP-DL 快速入门 | **C3 上放弃 ESP-DL 视觉**；人脸检测挪到 S3（D88） |
-| TFLite Micro + INT8 20–80KB 模型在 C3 上可实时 | 多份实测 | C3 走"传感器时序 + 音频关键字"路线 |
+| `WakeNet` 系列在 ESP32-S3 上跑**满血模型** | ESP-SR 支持矩阵 | 唤醒词/命令词直接在 S3 上做，不必退到降本版 → D74 |
+| ESP-DL 2.x 主攻 S3/P4，有 PIE/SIMD 加速 | ESP-DL 快速入门 | S3 上推理可行；但**摄像头在 ESP32-CAM 上**，S3 承担"接收 + 决策 / 卸载"→ D86/D90 |
+| TFLite Micro + INT8 + PSRAM arena 在 S3 上余量充足 | 多份实测 | 模型上限从 C3 的 40KB 放宽到 ~128KB，arena 可进 PSRAM（代价是延迟）→ D67–D69 |
 
-> **一句话结论**：C3 = 传感 + 音频 TinyML + 低功耗边缘节点；S3 = 视觉 + 唤醒词 + 网关。两块板分工写进架构文档（D90），这不是妥协，是**真实产品中的异构设计**，面试时反而是加分项。
+> **一句话结论**：**S3 = 主控 / 决策 / TinyML / 网关**；**ESP32-CAM = 眼睛（OV2640 采集 + 轻量检测）**。这种"算力在一端、传感器在另一端"的分工写进架构文档（D90），是真实产品的常见形态，面试时是加分项。
 
 ---
 
@@ -87,8 +88,9 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 
 | 板子 | 规格要求 | 用途 | 参考价 |
 |---|---|---|---|
-| ESP32-C3-DevKitM-1 或 C3 SuperMini | 4MB Flash | 主线全部实验 | ¥15–40 |
-| ESP32-S3-DevKitC-1 (WROOM-1 N8R8) | **8MB Flash + 8MB PSRAM** | D85–D91 视觉/异构 | ¥40–70 |
+| **ESP32-S3-DevKitC-1 (WROOM-1 N8R8)** | **8MB Flash + 8MB PSRAM** | **主线全部实验**（含双核/SMP/TinyML/网关） | ¥40–70 |
+| **ESP32-CAM (AI-Thinker)** | ESP32-S 双核 + OV2640 + PSRAM + microSD，**无 USB 转串口** | **摄像头与视觉链路**（D18–D19 / D86 / D89–D90） | ¥20–35 |
+| **3.3V USB-TTL（CH340 / CP2102）** | 3.3V 电平 | **必需**：给 ESP32-CAM 烧录、看日志 | ¥5–10 |
 
 ### 3.2 传感器与执行器（按阶段到货即可）
 
@@ -101,7 +103,7 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 | INMP441 | I2S | D72 | 音频/关键词识别 |
 | 按键 ×3、LED、电位器、电阻包 | GPIO/ADC | D8 | 基础外设 |
 | 5V 电源 + 470Ω/1kΩ 电阻 | | D23 | 功耗测量、上拉计算 |
-| OV2640 摄像头模块 | DVP/SPI | D87 | S3 视觉 |
+| OV2640（已焊在 ESP32-CAM 上） | DVP + SCCB | **D18** | 摄像头 bring-up、性能矩阵、视觉链路 |
 
 ### 3.3 仪器（求职面试常被问"你怎么验证的"，这些是底气）
 
@@ -111,7 +113,7 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 | 24MHz 8 通道逻辑分析仪（克隆版） | **必需** | I2C/SPI/WS2812/中断延迟测量 |
 | 万用表 | **必需** | 电压/通断/电流交叉验证 |
 | 示波器（学校实验室借） | 可选 | PWM 波形、电源纹波、抖动 |
-| JTAG | **C3/S3 内置，无需购买** | D48 源码级调试 |
+| JTAG | **S3 内置，无需购买** | D48 源码级调试 |
 
 ### 3.4 PID 闭环控制增购件（W12 用）
 
@@ -134,12 +136,12 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 | 阶段 | 周 | 天 | 主题 | 阶段交付物 |
 |---|---|---|---|---|
 | **P0** 打通链路 | W1 | D1–D7 | 工具链、构建系统、烧录三件套、分区表、崩溃解析 | `00_bringup/` + 可复现 `sdkconfig.defaults` |
-| **P1** 驱动层 | W2–W4 | D8–D28 | GPIO/UART/I2C/SPI/ADC/PWM/RMT + **手写驱动** + 内存/低功耗/看门狗 | `common_components/`（5 个自写驱动）+ `node_v0.1` |
+| **P1** 驱动层 | W2–W4 | D8–D28 | GPIO/UART/I2C/SPI/PWM/RMT + **手写驱动** + **摄像头（OV2640/DVP/PSRAM）** + 内存/低功耗/看门狗 | `common_components/`（5 个自写驱动）+ `80_cam/` + `node_v0.1` |
 | **P2** 通信层 | W5–W6 | D29–D42 | WiFi/MQTT/HTTP/BLE/NVS/配网/OTA | `node_v1.0`（可配网 + 可 OTA 的联网节点） |
-| **P3** 系统层 | W7 | D43–D49 | FreeRTOS 调度/同步/优先级反转/栈/中断延迟 + JTAG | RTOS 实测数据报告 |
-| **P4** 底层架构 | W8–W9 | D50–D63 | 启动链、链接脚本、段布局、内存映射、异常向量、RISC-V 汇编、Cache、体积优化、coredump | `notes/arch-report.md`（10 页底层分析） |
-| **P5** TinyML | W10–W11 | D64–D77 | 采集→训练→INT8 量化→TFLite Micro→音频 KWS→ESP-SR→异常检测 | `50_tinyml/`（3 个模型 + 选型报告） |
-| **P6** 边缘计算 | W12–W13 | D78–D91 | **PID 闭环控制**、规则引擎、断网续传 + **S3 双核调度 / SMP / 视觉 / ESP-NOW / 异构卸载** | `60_edge/` + 异构架构文档 |
+| **P3** 系统层 | W7 | D43–D49 | FreeRTOS 调度（含**绑核**）/同步/优先级反转/栈/中断延迟 + JTAG | RTOS 实测数据报告 |
+| **P4** 底层架构 | W8–W9 | D50–D63 | 启动链（含 **CPU1 何时被拉起**）、链接脚本、段布局、内存映射、异常向量、**Xtensa 汇编**、Cache、体积优化、coredump | `notes/arch-report.md`（10 页底层分析） |
+| **P5** TinyML | W10–W11 | D64–D77 | 采集→训练→INT8 量化→TFLite Micro（**PIE/SIMD + PSRAM arena**）→音频 KWS→ESP-SR→异常检测 | `50_tinyml/`（3 个模型 + 选型报告） |
+| **P6** 边缘计算 | W12–W13 | D78–D91 | **PID 闭环控制**、规则引擎、断网续传 + **双核 SMP / 视觉分核 / ESP-NOW / 异构卸载**（+ ADC 校准、定时器对决回填） | `60_edge/` + 异构架构文档 |
 | **P7** 旗舰与求职 | W14–W16 | D92–D112 | 系统集成、可靠性加固、CI、文档、简历、八股、模拟面试 | `90_flagship/` 可演示系统 + 求职包 |
 
 ---
@@ -156,7 +158,7 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 | 天 | 主题 | 读 | 写 | 产出 / 🎯验收 |
 |---|---|---|---|---|
 | **D1** 周一 | ★ 仓库与环境基线 | IDF 快速入门、构建系统概览 | 建 `c3-lab` git 仓库、`.gitignore`、`README.md`、`sdkconfig.defaults`、`tools/flash.ps1`（一键 build+flash+monitor） | 🎯 `idf.py --version` 正常；仓库 ≥3 个语义化 commit；`flash.ps1 -Port COM5` 可用 |
-| **D2** 周二 | ★ 烧录三件套 | Bootloader & 分区表概述 | `idf.py create-project`、`set-target esp32c3`、build；手工用 `esptool.py` 分别烧 bootloader / partition-table / app | 🎯 笔记画出三个 bin 的**偏移地址与作用**；关掉 `flash.ps1` 手工烧录也能点亮 |
+| **D2** 周二 | ★ 烧录三件套 | Bootloader & 分区表概述 | `idf.py create-project`、`set-target esp32s3`、build；手工用 `esptool.py` 分别烧 bootloader / partition-table / app | 🎯 笔记画出三个 bin 的**偏移地址与作用**；关掉 `flash.ps1` 手工烧录也能点亮 |
 | **D3** 周三 | ★ menuconfig 与配置固化 ⚠️ | Kconfig 机制 | 改 Console → **USB Serial/JTAG**、Flash 4MB、`-Og`、断言、日志级别；全部落到 `sdkconfig.defaults` | 🎯 删 `sdkconfig` 后重新 build，`sdkconfig` 与之前**逐行一致**；USB 口直连能看到日志 |
 | **D4** 周四 | 日志与错误处理 | `esp_log.h` / `esp_err.h` | 封装 `app_log.h`（统一 TAG、模块 ID、`ESP_ERROR_CHECK` 安全替代 `CHECK_ERR`） | 🎯 5 个等级可运行时动态开关；组件 `app_log` 可被其他工程引用 |
 | **D5** 周五 | ★ 崩溃现场解析 ⚠️ | Fatal Errors 文档 | 故意制造 5 类崩溃：空指针读、非法指令跳转、除零、`assert`、栈溢出 | 🎯 每类都能用 `addr2line` 定位到**你自己的源码行号**，笔记含 5 段原始日志 |
@@ -188,8 +190,8 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 | **D15** 周一 | ★ SSD1306 自写驱动 ⚠️ | SSD1306 数据手册（页寻址/显存） | 完整驱动：初始化序列、显存缓冲、6x8 与 8x16 字模、`oled_printf` 风格 API、局部刷新 | `common_components/ssd1306`。🎯 实时显示温度 + 自造中文点阵；刷新无闪烁 |
 | **D16** 周二 | ★ SPI 与吞吐极限 | SPI Master（事务队列 / DMA / 时序参数） | SPI 环回 40MHz 传 10KB + 可配 `dummy_bits`/`cs_ena_pretrans` | 🎯 理论 vs 实测吞吐偏差分析（解释差值来自哪里） |
 | **D17** 周三 | ★ RMT 与 WS2812 | RMT 编码器 API（`rmt_new_tx_channel`） | 用 RMT 编码 WS2812 的 T0H/T1H/Treset，实现色轮 + 亮度渐变 | `common_components/ws2812`。🎯 逻辑分析仪确认 T0H=0.4µs±150ns、T1H=0.8µs±150ns |
-| **D18** 周四 | ★ ADC 与校准 ⚠️ | ADC oneshot / continuous(DMA) / `adc_cali` | 多点电压测量；原始值 vs 校准值 vs 万用表三方对比；**实测 ADC2 与 WiFi 冲突** | 🎯 校准后误差 <2% FS；WiFi 开启时 ADC2 行为有明确结论 |
-| **D19** 周五 | ★ 三种定时器对决 | `esp_timer` / GPTimer / FreeRTOS Timer | 同一个 1kHz 周期任务用三种实现，各跑 10 万次记录抖动分布 | 🎯 抖动表（均值/P99/最坏）+ "什么场景用哪个"的结论 |
+| **D18** 周四 | ★★ 摄像头 bring-up：ESP32-CAM + OV2640 ⚠️ | `esp32-camera` README、OV2640 的 DVP 时序（PCLK/XCLK/VSYNC/HREF）、SCCB | 3.3V USB-TTL + **GPIO0 接地**烧录；`set-target esp32` + 引 `espressif/esp32-camera` + 开 SPIRAM；采一帧 JPEG 回传 PC 打开看；确认帧缓存在 PSRAM | `80_cam/cam_v1`。🎯 PC 上打开自己拍的 JPEG；`MALLOC_CAP_SPIRAM` 前后差值与帧缓存大小对得上；画出引脚占用表 |
+| **D19** 周五 | ★★ 摄像头性能矩阵 + 第一次视觉推理 ⚠️ | sensor 配置项（分辨率/质量/`fb_location`）、MTMN 人脸检测 vs 自训小分类器 | 扫 分辨率 × `jpeg_quality` × `fb_count`，记帧率/PSRAM/单帧字节；JPEG 后处理 vs RGB565 直出；跑通一个检测或分类，采集与推理耗时分开计 | 🎯 分辨率×质量×帧率×PSRAM 矩阵表 + "实时可用"上限；采集 vs 推理耗时占比有数字 |
 | **D20** 周六 | ★ 组件化与单元测试 ⚠️ | Component Manager、Unity、pytest-embedded | 把 D8–D17 的驱动搬进 `components/`，加 `idf_component.yml`，写 ≥8 个 Unity 单测 | 🎯 `idf.py -T` 单测全绿；`idf.py fullclean` 后仍可编 |
 | **D21** 周日 | 复盘 + 博客 #3 | | 《把 demo 变成组件：ESP-IDF 组件化与单元测试》 | **周 Gate**：组件库可被外部工程一行依赖引用 |
 
@@ -199,7 +201,7 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 
 | 天 | 主题 | 读 | 写 | 产出 / 🎯验收 |
 |---|---|---|---|---|
-| **D22** 周一 | ★ 内存模型 ⚠️ | Memory Types、Heap 分配 | `heap_caps_malloc` 各 CAP 组合实验、`IRAM_ATTR` 对比、`MALLOC_CAP_DMA \| INTERNAL` 失败复现 | 🎯 分配矩阵表；能解释"为什么这个 buffer 不能放外部 RAM" |
+| **D22** 周一 | ★ 内存模型：SRAM / PSRAM / DMA ⚠️ | Memory Types、`multi_heap`、`CONFIG_SPIRAM_*` 配置项 | `heap_caps_malloc` 各 CAP 组合实验；100KB buffer 在内部 RAM vs PSRAM 的带宽与延迟；`IRAM_ATTR` 对比；再用 `UNICORE` / `SPIRAM=n` 各编一次做对照 | 🎯 分配矩阵表（含地址区间）+ PSRAM vs 内部 RAM 带宽数字；能解释帧缓存为何必须进 PSRAM、DMA 描述符为何不能 |
 | **D23** 周二 | ★ 低功耗实测 ⚠️ | Sleep Modes 文档 | active / light sleep / deep sleep 三态；RTC 定时唤醒 + GPIO 唤醒 | 🎯 三种状态电流实测（USB 表 + 万用表交叉验证）；唤醒周期误差 <1% |
 | **D24** 周三 | ★ 看门狗 | TWDT / INT_WDT / RTC_WDT | 构造 5 类 WDT 场景：任务饿死、临界区过长、ISR 卡死、`vTaskDelay` 误用、flash 操作超时 | 🎯 每类都能读懂 panic 信息并写出修复 |
 | **D25** 周四 | ★★ 综合工程：采集节点 v0.1 | 复习本周全部 | SHT30 + OLED + 按键 + `frame_proto` + console 命令行（`get/set/help/reboot`） | `10_drivers/node_v01`。🎯 串口命令全可用；连续运行 2h 无内存泄漏（`heap_caps_get_free_size` 前后一致） |
@@ -243,13 +245,13 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 
 | 天 | 主题 | 读 | 写 | 产出 / 🎯验收 |
 |---|---|---|---|---|
-| **D43** 周一 | ★ 任务与调度器 | 任务管理 + `tasks.c` 调度核心 | 优先级实验（抢占/同优先级轮转）；`vTaskDelay` vs `vTaskDelayUntil` 抖动对比 | 🎯 抖动数据表；能解释 `configTICK_RATE_HZ=100` 下 1ms 任务的命运 |
+| **D43** 周一 | ★ 任务与调度器（含绑核） | 任务管理 + `tasks.c` 调度核心 + `xTaskCreatePinnedToCore` | 优先级实验（抢占/同优先级轮转）；同一负载绑核 0 / 绑核 1 / 不绑 各一遍；`vTaskDelay` vs `vTaskDelayUntil` 抖动对比 | 🎯 抖动数据表 + 三组绑核吞吐/延迟；能解释 `configTICK_RATE_HZ=100` 下 1ms 任务的命运 |
 | **D44** 周二 | ★ 同步原语选型 | queue / semaphore / mutex / event group / task notification | 同一生产者-消费者问题用 **队列 / 流缓冲 / 任务通知** 三种实现 | 🎯 吞吐与延迟对比表 → 得出选型规则（面试高频） |
 | **D45** 周三 | ★ 优先级反转 ⚠️ | 优先级继承、递归锁 | 构造经典三任务反转；用带继承的 mutex 修复 | 🎯 修复前后最坏延迟数字（如 210ms → 300µs），时序图 1 张 |
-| **D46** 周四 | ★ 堆与栈 ⚠️ | 堆 region、栈溢出检测 | 4 个堆 region 的分配走向；用 `uxTaskGetStackHighWaterMark` 反推最小栈；触发栈溢出 | 🎯 每任务栈大小**有实测依据**；能解释 `heap_caps` 与 `malloc` 的关系 |
-| **D47** 周五 | ★ 中断与临界区 | `port.c`(RISC-V)、`portENTER_CRITICAL`、`*FromISR` | GPIO 中断打点 + 逻辑分析仪测"中断→任务收到"延迟；改变临界区长度 | 🎯 中断延迟基线 + 临界区长度的影响曲线 |
+| **D46** 周四 | ★ 堆与栈 ⚠️ | 堆 region、栈溢出检测 | 内部 RAM 各 region + PSRAM region 的分配走向；用 `uxTaskGetStackHighWaterMark` 反推最小栈；触发栈溢出 | 🎯 每任务栈大小**有实测依据**；能解释 `heap_caps` 与 `malloc` 的关系 |
+| **D47** 周五 | ★ 中断与临界区 | `port.c`(Xtensa)、`portENTER_CRITICAL`、`*FromISR`、自旋锁 | GPIO 中断打点 + 逻辑分析仪测"中断→任务收到"延迟；改变临界区长度；`esp_ipc_call` 让对方核在临界区内跑一段 | 🎯 中断延迟基线 + 临界区长度曲线 + 跨核延迟数字 |
 | **D48** 周六 | ★★ JTAG 源码级调试 ⚠️ | OpenOCD / GDB 集成 | `idf.py openocd` + `idf.py gdb`；断点、watchpoint、看寄存器、单步；在任务切换处观察 `pxCurrentTCB`；记录 WDT 与断点冲突的解决办法 | 🎯 能像调试 PC 程序一样调试固件；note 里写清"打断点为什么会复位" |
-| **D49** 周日 | 复盘 + 博客 #7 | | 《用数据说明白：ESP32-C3 上的 RTOS 调度与延迟》 | **阶段 Gate**：能用自测数据回答 10 个 RTOS 面试题 |
+| **D49** 周日 | 复盘 + 博客 #7 | | 《用数据说明白：ESP32-S3 上的 RTOS 调度、绑核与延迟》 | **阶段 Gate**：能用自测数据回答 10 个 RTOS 面试题 |
 
 ---
 
@@ -259,13 +261,13 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 
 | 天 | 主题 | 读 | 写 | 产出 / 🎯验收 |
 |---|---|---|---|---|
-| **D50** 周一 | ★★ 启动链全景 ⚠️ | ROM bootloader 文档、`components/bootloader/bootloader_start.c` | 打开 bootloader 详细日志，逐行标注每个阶段做了什么；定位 eFuse/strap pin 判定分支 | 🎯 启动阶段时序图（eFuse → ROM → 2nd boot → app） |
+| **D50** 周一 | ★★ 启动链全景 ⚠️ | ROM bootloader 文档、`components/bootloader/bootloader_start.c` | 打开 bootloader 详细日志，逐行标注每个阶段；定位 eFuse/strap pin 判定分支；**找出 CPU1 是哪一刻被拉起的** | 🎯 启动阶段时序图（eFuse → ROM → 2nd boot → app → CPU1 up） |
 | **D51** 周二 | ★★ app 启动细节 | `port/cpu_start.c`（`call_start_cpu0`）、`app_startup.c` | 在 `call_start_cpu0`、`esp_startup_start_app`、`main_task` 插桩打印 | 🎯 `app_main` 之前的**函数级调用链**（≥12 层） |
-| **D52** 周三 | ★ 链接脚本与段布局 ⚠️ | `sections.ld.in`、`memory.ld.in`、`build/*.project.ld` | `riscv32-esp-elf-objdump -h/-t` 列出 `.text/.rodata/.data/.bss/.iram0/.dram0`；对照 `.map` | 🎯 **预测**一个新变量落在哪个段并实测验证（连续 3 次全中） |
+| **D52** 周三 | ★ 链接脚本与段布局 ⚠️ | `sections.ld.in`、`memory.ld.in`、`build/*.project.ld` | `xtensa-esp32s3-elf-objdump -h/-t` 列出 `.iram0.text/.dram0.data/.flash.text/.flash.rodata` 等段；对照 `sections.ld.in`(esp32s3) 与 `.map` | 🎯 **预测**一个新变量落在哪个段并实测验证（连续 3 次全中） |
 | **D53** 周四 | ★ 内存映射与 mmap ⚠️ | TRM Memory Map 章节、`esp_partition_mmap` | 把 `model`/`storage` 分区 mmap 进地址空间并读取 | 🎯 打印映射地址窗口，验证内容；解释"为什么能像内存一样读 Flash" |
-| **D54** 周五 | ★ 异常与中断向量 | TRM 中断/异常、`esp_intr_alloc` | 注册 GPIO/UART/Timer 三类中断；读 `mtvec/mcause/mepc/mstatus` | 🎯 故意触发异常后能靠 `mcause` 判断异常类型并手写解析 |
-| **D55** 周六 | ★ RISC-V 汇编与周期计数 | RV32IMC ISA 摘要 | 手写一个汇编函数（`memcpy` 或 CRC16）；用 `csrr mcycle/minstret` 做周期计数工具 | `common_components/prof`。🎯 汇编版比 C 版快且有周期数据；能读反汇编看懂编译器在干什么 |
-| **D56** 周日 | 复盘 + 博客 #8 | | 《ESP32-C3 从上电到 app_main：一条链走完》 | 🎯 博客含你自己画的调用链图 |
+| **D54** 周五 | ★ 异常与中断向量 | TRM 中断/异常、`esp_intr_alloc` | 注册 GPIO/UART/Timer 三类中断；用 `rsr` 读 `EXCCAUSE / EPC / EXCVADDR / PS` | 🎯 故意触发异常后能靠 `EXCCAUSE` 判断类型并手写解析 |
+| **D55** 周六 | ★ Xtensa 汇编与周期计数 | Xtensa LX7 ISA 摘要、windowed ABI vs call0 | 手写一个汇编函数（`memcpy` 或 CRC16）；用 `rsr CCOUNT` 做周期计数工具 | `common_components/prof`。🎯 汇编版比 C 版快且有周期数据；能读反汇编看懂编译器在干什么 |
+| **D56** 周日 | 复盘 + 博客 #8 | | 《ESP32-S3 从上电到 app_main：一条链走完，顺带拉起第二个核》 | 🎯 博客含调用链图 + 双核启动时序 |
 
 ---
 
@@ -273,7 +275,7 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 
 | 天 | 主题 | 读 | 写 | 产出 / 🎯验收 |
 |---|---|---|---|---|
-| **D57** 周一 | ★ Cache 与 Flash 执行 ⚠️ | TRM Cache 章节、`spi_flash` 配置 | 热点函数加/不加 `IRAM_ATTR` 的 `mcycle` 对比；查 TRM 确认 C3 cache 容量/路数 | 🎯 性能提升百分比 + 对"为什么中断处理要放 IRAM"的解释 |
+| **D57** 周一 | ★ Cache 与 Flash 执行 ⚠️ | TRM Cache 章节、`spi_flash` 配置 | 热点函数加/不加 `IRAM_ATTR` 的 `CCOUNT` 对比；查 TRM 确认 S3 cache 容量/路数，以及 PSRAM 是否也走 cache | 🎯 性能提升百分比 + 对"为什么中断处理要放 IRAM"的解释 |
 | **D58** 周二 | ★ 性能测量方法论 | `esp_cpu`、周期计数器 | 完善 `prof` 组件：区间计时、P50/P99 分布、跨任务统计 | 🎯 能给任意函数出耗时分布图 |
 | **D59** 周三 | 二进制体积优化 | `idf.py size` / `size-components` / `size-files` | 逐项裁剪：日志级别、`-Os`、LTO、关掉不用的组件 | 🎯 app 体积缩小 ≥15% 且功能不变（附对比表） |
 | **D60** 周四 | ★ 崩溃现场还原 ⚠️ | panic handler、coredump（flash/uart） | 开启 coredump 到 flash 分区；构造崩溃后离线解析出调用栈与关键变量 | 🎯 能从一次真实崩溃还原任务名+调用栈+寄存器 |
@@ -285,17 +287,17 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 
 ### W10 · D64–D70 ｜ P5 TinyML（一）数据 → 训练 → 量化 → 部署
 
-**周目标**：把"我会 PyTorch"变成"我能让 400KB SRAM 的单片机实时跑神经网络"。
+**周目标**：把"我会 PyTorch"变成"我能让一颗 240MHz 双核 + 8MB PSRAM 的 MCU 实时跑神经网络，并说清哪部分性能是 PIE/SIMD 挣来的、哪部分被 PSRAM 带宽吃掉"。
 
 | 天 | 主题 | 读 | 写 | 产出 / 🎯验收 |
 |---|---|---|---|---|
-| **D64** 周一 | ★★ 数据集采集 ⚠️ | TinyML 数据采集最佳实践 | C3 以 100Hz 采 MPU6050 三轴；经串口/WiFi 传 PC 存 CSV；**5 类动作 × 50 次**，含"静止/噪声/错误动作"负样本 | 🎯 数据集 v1 + `notes/D064` 写明采集协议、标签规则、已知偏差 |
+| **D64** 周一 | ★★ 数据集采集 ⚠️ | TinyML 数据采集最佳实践 | S3 以 100Hz 采 MPU6050 三轴；经串口/WiFi 传 PC 存 CSV；**5 类动作 × 50 次**，含"静止/噪声/错误动作"负样本 | 🎯 数据集 v1 + `notes/D064` 写明采集协议、标签规则、已知偏差 |
 | **D65** 周二 | ★ 预处理与特征 | 时序窗口/归一化/FFT 特征 | Python：滑窗切分（重叠）、归一化、时域+频域特征提取、可视化可分性 | `pc_train/preprocess.py`。🎯 特征图显示类别可分 |
 | **D66** 周三 | ★ PC 训练 | Keras 小模型设计（CNN/DSCNN） | 训练 + 混淆矩阵 + 交叉验证；记录参数量 | `pc_train/train.py`。🎯 验证集准确率 ≥90%；模型参数量 <30K |
-| **D67** 周四 | ★ INT8 量化 ⚠️ | Post-training quantization、representative dataset | FP32 vs INT8（full-integer）对比：精度、大小、tensor 类型 | 🎯 精度下降 <3%，体积 ≤40KB，输入输出都是 int8 |
-| **D68** 周五 | ★★ 部署到 C3 ⚠️ | `esp-tflite-micro` 例程、Op resolver | 模型转 C 数组 → `MicroInterpreter` → op resolver 按需裁剪 → arena 调参 | `50_tinyml/gesture`。🎯 板上实时推理，端到端延迟 <100ms |
-| **D69** 周六 | ★ 性能调优 | Arena 内存模型、`esp-nn` 开关 | 二分法定 arena 上限；裁 op；开/关 `esp-nn` 对比（C3 无 PIE，预期收益有限） | 🎯 性能基线表：延迟/arena/CPU 占用/内存峰值 |
-| **D70** 周日 | 复盘 + 博客 #10 | | 《从 CSV 到 INT8：在 400KB SRAM 里塞进一个神经网络》 | 🎯 博客含完整流水线图与踩坑清单 |
+| **D67** 周四 | ★ INT8 量化 ⚠️ | Post-training quantization、representative dataset | FP32 vs INT8（full-integer）对比：精度、大小、tensor 类型 | 🎯 精度下降 <3%，体积 ≤128KB（PSRAM 放 arena，模型比 C3 宽松一档），输入输出都是 int8 |
+| **D68** 周五 | ★★ 部署到 S3 ⚠️ | `esp-tflite-micro` 例程、Op resolver | 模型转 C 数组或 mmap 分区 → `MicroInterpreter` → op resolver 按需裁剪 → arena 先内部 RAM 再试 PSRAM | `50_tinyml/gesture`。🎯 板上实时推理，端到端延迟 <50ms（S3 有 PIE/SIMD，标准比 C3 高一档） |
+| **D69** 周六 | ★ 性能调优 | Arena 内存模型、`esp-nn` 开关 | 二分法定 arena 上限；裁 op；开/关 `esp-nn` 对比（**S3 有 128 位 PIE/SIMD，加速必须量化**）；arena 在内部 RAM vs PSRAM 的延迟差 | 🎯 性能基线表：延迟/arena/CPU 占用/内存峰值 |
+| **D70** 周日 | 复盘 + 博客 #10 | | 《从 CSV 到 INT8：双核 240MHz + PIE 上跑神经网络，PSRAM 帮了多少忙》 | 🎯 博客含完整流水线图与踩坑清单 |
 
 ---
 
@@ -306,51 +308,54 @@ P7 求职产出  ←  P6 边缘计算  ←  P5 TinyML  ←  P4 底层架构
 | **D71** 周一 | ★ 模型进分区 + mmap ⚠️ | D53 的 mmap 成果 + TFLite 模型加载 | 模型放 `model` 分区，`esp_partition_mmap` 直接喂给 interpreter，支持 OTA 换模型 | 🎯 **不重新烧 app** 就能换模型并生效 |
 | **D72** 周二 | ★ 音频链路：I2S + INMP441 ⚠️ | I2S 驱动（std/tdm/pdm）、24bit 对齐 | 24bit 采集 → 降采样到 16kHz → 存 WAV 到 LittleFS / 经串口回传 | 🎯 PC 播放清晰无爆音；采样率误差 <1% |
 | **D73** 周三 | ★★ 自训关键词识别 (KWS) | MFCC 前端、KWS 网络结构 | MFCC 特征 + 小 CNN，训练 3 类（"开灯"/"关灯"/"噪声"）；部署复跑 D68 流水线 | `50_tinyml/kws`。🎯 现场 10 次识别 ≥8 次正确 |
-| **D74** 周四 | ★ ESP-SR 官方方案 ⚠️ | ESP-SR 支持矩阵（`WakeNet9s`/`WakeNet10s` 支持 C3） | 跑通唤醒词例程 → 接业务逻辑（唤醒后开灯/上报） | `50_tinyml/wakeword`。🎯 1 小时内唤醒次数/误唤醒次数都有记录 |
+| **D74** 周四 | ★ ESP-SR 官方方案 ⚠️ | ESP-SR 支持矩阵（**S3 用满血 WakeNet**） | 跑通唤醒词例程 → 接业务逻辑（唤醒后开灯/上报） | `50_tinyml/wakeword`。🎯 1 小时内唤醒次数/误唤醒次数都有记录 |
 | **D75** 周五 | ★ 异常检测（无监督） | 自编码器 / 统计阈值法 | 振动或电流数据上做异常检测，输出异常分数 + 报警 | 🎯 注入异常能报警，误报率有数据 |
 | **D76** 周六 | ★★ 三模型横向选型报告 | — | 手势 / 关键词 / 异常 三模型在 **精度-延迟-内存-功耗** 四维对比 | `notes/tinyml-selection.md`。🎯 能回答"什么任务该用哪种方案" |
-| **D77** 周日 | 复盘 + 博客 #11 | | 《ESP32-C3 到底能跑多大的模型：实测边界》 | **阶段 Gate**：3 个模型全部板载可运行 + 有边界结论 |
+| **D77** 周日 | 复盘 + 博客 #11 | | 《ESP32-S3 到底能跑多大的模型：PSRAM、PIE 与 cache 的真实边界》 | **阶段 Gate**：3 个模型全部板载可运行 + 有边界结论 |
 
 ---
 
 ### W12 · D78–D84 ｜ P6 边缘计算（一）PID 闭环控制 + 规则 / 离线
 
-**周目标**：把一个闭环从头到尾坐实——**硬件搭好、自己实现算法、自己整定、自己发现并解决 MCU 上的真实问题**。PID 公式三行就写完了，难的是：定时抖动会让 D 项变成放大器，积分饱和会让系统开机就冲顶，传感器噪声会让你以为 Kd 没用。这周复用 D19（定时抖动）、D47（中断延迟）、D55（周期计数）的全部测量结果。
+**周目标**：把一个闭环从头到尾坐实——**硬件搭好、自己实现算法、自己整定、自己发现并解决 MCU 上的真实问题**。PID 公式三行就写完了，难的是：定时抖动会让 D 项变成放大器，积分饱和会让系统开机就冲顶，传感器噪声会让你以为 Kd 没用。这周复用 D47（中断延迟）与 D55（周期计数）的测量方法；原 D19「三种定时器对决」已后移到 D88，控制周期的抖动基线改在 **D79 / D81 现场自测**（控制回路本身就是最好的抖动测量对象）。
 
 | 天 | 主题 | 读 | 写 | 产出 / 🎯验收 |
 |---|---|---|---|---|
 | **D78** 周一 | ★★ 闭环硬件搭建与开环辨识 ⚠️ | 功率器件基础、NTC 分压与 Steinhart-Hart、安全限幅 | 搭温控回路（加热片 + MOS + NTC + 限温开关）；手动给 0/25/50/75/100% PWM，记录开环阶跃响应到温度曲线；跑开环加热极限测试 | 🔥 **安全第一**：先接限温开关和保险丝再上电。`60_edge/pid/`。🎯 拿到开环阶跃数据（升温斜率、最大温升、时间常数 τ），离线拟合出被控对象的**一阶惯性 + 滞后**参数 |
-| **D79** 周二 | ★ PID 离散化实现 | 位置式/增量式 PID、抗积分饱和（clamping / back-calculation）、不完全微分、死区补偿 | 写 `pid` 组件：位置式 + 增量式两版、实心抗积分饱和、输出限幅、微分滤波；**float vs 定点 Q15 用 D55 的 `mcycle` 对比周期数** | `common_components/pid`。🎯 两版都能跑；定点版比 float 版快且有数字；组件有单测（纯算法可 PC 侧验证） |
+| **D79** 周二 | ★ PID 离散化实现 | 位置式/增量式 PID、抗积分饱和（clamping / back-calculation）、不完全微分、死区补偿 | 写 `pid` 组件：位置式 + 增量式两版、实心抗积分饱和、输出限幅、微分滤波；**float vs 定点 Q15 用 D55 的 `rsr CCOUNT` 对比周期数** | `common_components/pid`。🎯 两版都能跑；定点版比 float 版快且有数字；组件有单测（纯算法可 PC 侧验证） |
 | **D80** 周三 | ★★ 整定与闭环实测 ⚠️ | Ziegler-Nichols 临界比例度法、手动整定经验 | 先用开环数据离线仿真出初值 → 上板 Z-N / 手动整定 → 测阶跃响应：**超调、上升时间、调节时间、稳态误差、振荡次数**；☆ 用 D33 的 WebSocket 做实时曲线 + 在线改 Kp/Ki/Kd | 🔥 三组参数对比表（保守/适中/激进）+ 曲线截图。🎯 终版：超调 <10%，稳态误差 <1%，无持续振荡 |
 | **D81** 周四 | ★★ PID 在 MCU 上的真实问题 ⚠️ | 控制周期抖动对控制质量的影响、微分噪声、积分饱和、执行器死区 | 刻意破坏实验：① 把控制任务改成普通 `vTaskDelay`（周期抖动）对比 `vTaskDelayUntil` ② 微分项不滤波 vs 滤波 ③ 关掉抗饱和看开机冲顶 ④ 在控制回路里插入 5ms 阻塞调用看崩溃过程；☆ 换电机转速环重复一遍（响应快，抖动敏感度放 10 倍） | `notes/pid-mcu.md`。🎯 每种劣化都有**曲线 + 数据**；能讲清"为什么 PI 已经够用还要 D" |
 | **D82** 周五 | ★ 规则引擎 + 消息总线 | 发布订阅、规则 DSL / 状态机 | JSON 规则存 NVS（`if 温度>30 且 持续60s then 报警`）+ 去抖 + 事件抑制；`bus` 组件（主题订阅、异步分发、背压） | `60_edge/rules` + `common_components/bus`。🎯 改规则**不重启**即生效；新增模块**不改老代码** |
 | **D83** 周六 | ★★ 断网续传 + 时间对齐 ⚠️ | LittleFS、环形日志、SNTP 与单调时钟 | 本地环形日志 + 断网缓存 + 恢复补传 + 幂等去重；时间戳体系（UTC + 单调 tick + 漂移补偿） | 🎯 断网 30min 数据**一条不丢**不重；两节点数据时间对齐误差 <50ms |
-| **D84** 周日 | 复盘 + 博客 #12 | | 《PID 不难，难的是它跑在一颗 160MHz 单核上》 | **阶段 Gate**：闭环连续稳定运行 ≥2h 无振荡、无冲顶；博客含三组整定曲线 |
+| **D84** 周日 | 复盘 + 博客 #12 | | 《PID 不难，难的是它跑在一颗 240MHz 双核、还要和别的任务抢 CPU 的芯片上》 | **阶段 Gate**：闭环连续稳定运行 ≥2h 无振荡、无冲顶；博客含三组整定曲线 |
 
 > **内容搬家说明**：原「端云数据分级」归入 **D90 异构卸载**（它本质就是卸载判据）；原「功耗预算模型」归入 **D95 功耗打磨**。边缘计算主题没有缩水，只是归位。
 
 ---
 
-### W13 · D85–D91 ｜ P6 边缘计算（二）异构：双核调度 / SMP / 视觉 / 卸载
+### W13 · D85–D91 ｜ P6 边缘计算（二）双核 / SMP / 视觉分核 / 卸载 + 回填
 
-**周目标**：C3 是单核，**双核调度必须在 S3 上练**。这一周同时回答两个面试必问的问题：「SMP 下你怎么保证临界区安全」「什么时候该把任务从一端挪到另一端」。
+**周目标**：S3 是双核，**会不会用第二个核**是这一周的分水岭；同时把 W3 挤出来的两个测量（ADC 校准、三种定时器对决）在这里补齐。这一周要回答两个面试必问的问题：「SMP 下你怎么保证临界区安全」「什么时候该把任务从一端挪到另一端」。
 
 | 天 | 主题 | 读 | 写 | 产出 / 🎯验收 |
 |---|---|---|---|---|
-| **D85** 周一 | ★ S3 上手与单/双核差异 | S3 vs C3（双核 LX7 / PSRAM / PIE+SIMD / 无 SMP 对比） | 同一份代码 `set-target esp32s3` 直接编过（验证组件复用质量） | 🎯 **一套组件两款芯片**都能编过、都能跑；列出"哪些代码在 C3 上是死路" |
-| **D86** 周二 | ★★ 双核调度与 SMP ⚠️ | IDF SMP 配置（`CONFIG_FREERTOS_UNICORE`）、`xTaskCreatePinnedToCore`、`portMUX`/自旋锁、`esp_ipc_call(_blocking)` | ① 任务绑核 0 / 绑核 1 / 不绑，测同一负载的吞吐与延迟 ② 跨核临界区用 `portENTER_CRITICAL(&mux)` 复现数据竞争并修复 ③ 用 `esp_ipc_call` 强制另一核跑一段代码 ④ 测跨核唤醒延迟与核间 cache 一致性 | `common_components/smp_probe`。🎯 单核 vs 双核吞吐对比表（加速比数字）；竞争 bug 的复现日志 + 修复前后差异 |
-| **D87** 周三 | ★ PSRAM + 摄像头流水线 ⚠️ | `MALLOC_CAP_SPIRAM`、外部 RAM 访问代价、`esp32-camera`、DVP 时序 | 大 buffer 内部 vs PSRAM 带宽/延迟对比；采集 JPEG，扫分辨率/帧率/内存占用（**摄像头帧缓存必须进 PSRAM**，正好实证 D87 的结论） | 🎯 内存分层表 + "什么放 PSRAM"规则 + 帧率数据表（如 QVGA 25fps） |
-| **D88** 周四 | ★★ 视觉推理：单核做不动 → 双核分工 | ESP-DL 模型 API | 人脸检测 + 串口输出坐标；**把采集搬到一个核、推理搬到另一个核**，对比单核基线的帧率 | `85_s3/face`。🎯 实测帧率 ≥5fps；双核分工相较单核的加速比有数字 |
-| **D89** 周五 | ★ 异构通信：ESP-NOW ⚠️ | ESP-NOW 文档 | C3 ↔ S3 双向传输：ACK、重传、丢包统计、RSSI 记录 | `common_components/espnow_link`。🎯 丢包率/延迟数据表 |
-| **D90** 周六 | ★★ 异构计算：任务卸载设计 | 边缘卸载策略（本地 / 邻居节点 / 云端） | 三方案实测对比：同一推理任务 ① C3 本地跑 ② 卸载到 S3 ③ 上传到 PC 云端；测**端到端延迟 / 电量 / 准确率 / 断网可用性**；写架构图 + 数据契约 + 失败降级路径 | `notes/offload-design.md`。🎯 一张四维对比表 + 一份"什么情况卸载、什么情况不卸载"的判定树；接口/超时/降级全定义 |
-| **D91** 周日 | 复盘 + 博客 #13 | | 《SMP 与异构卸载：双核不是把活分两半》 | **阶段 Gate**：两块板稳定互通 ≥1 小时无断链；能脱稿讲清自旋锁/绑核/卸载决策 |
+| **D85** 周一 | ★★ 双核调度与 SMP ⚠️ | IDF SMP 配置（`CONFIG_FREERTOS_UNICORE`）、`xTaskCreatePinnedToCore`、`portMUX`/自旋锁、`esp_ipc_call(_blocking)` | ① 任务绑核 0 / 绑核 1 / 不绑，测同一负载的吞吐与延迟（D43 小实验升级版）② 跨核 `portENTER_CRITICAL(&mux)` 复现数据竞争并修复 ③ `esp_ipc_call` 强制另一核跑一段 ④ 跨核唤醒延迟 ⑤ `UNICORE=y` 对照 | `common_components/smp_probe`。🎯 单核 vs 双核吞吐对比表（加速比）；竞争 bug 复现日志 + 修复前后差异 |
+| **D86** 周二 | ★★ 视觉流水线拆核（采集 ↔ 推理） | SMP 任务划分、队列与背压、`esp32-camera` 在 ESP32-CAM 上的线程模型 | 把 D19 的采集 + 推理拆到 ESP32-CAM 的两个核（核 0 采集、核 1 推理），与 D19 单核基线逐项对比；测每核 CPU 占用与队列深度 | 🎯 拆核后帧率提升百分比；能说清"哪一段真能并行、哪一段拆了反而更慢" |
+| **D87** 周三 | ★ ADC 与校准（原 D18 回填）⚠️ | ADC oneshot / continuous(DMA)、`adc_cali` 曲线拟合 vs 线性、衰减档与量程 | 电位器 10 点测量（0.1–2.5V）：raw / cali / 万用表三方对照；ADC1 vs ADC2；开 WiFi 复测 | 🎯 校准后误差 <2% FS；WiFi 开启时 ADC 行为有明确结论（可用 / 需避让 / 精度掉多少） |
+| **D88** 周四 | ★ 三种定时器对决（原 D19 回填）⚠️ | `esp_timer` / GPTimer / FreeRTOS Timer 的实现差异（中断 vs 任务上下文、精度、漂移） | 同一 1kHz 周期任务三实现各跑 10 万次，记抖动分布；绑核与不绑各一轮；把 `prof` 的 P50/P99 能力补齐 | 🎯 抖动表（均值/P99/最坏）+ "什么场景用哪个"的结论 |
+| **D89** 周五 | ★ 异构通信：ESP-NOW ⚠️ | ESP-NOW 文档（peer、加密、ACK） | S3 ↔ ESP32-CAM 双向传输：ACK、重传、丢包统计、RSSI 记录；CAM 侧上报一帧缩略图 + 检测结果 | `common_components/espnow_link`。🎯 丢包率/延迟数据表 |
+| **D90** 周六 | ★★ 异构计算：任务卸载设计 | 边缘卸载策略（本地 / 邻居节点 / 云端） | 三方案实测：同一推理任务 ① S3 本地跑 ② 卸载到 CAM ③ 上传 PC 云端；测**端到端延迟 / 电量 / 准确率 / 断网可用性**；写架构图 + 数据契约 + 失败降级路径 | `notes/offload-design.md`。🎯 四维对比表 + "什么情况卸载"判定树；接口/超时/降级全定义 |
+| **D91** 周日 | 复盘 + 博客 #13 | | 《SMP 与异构卸载：双核不是把活分两半》 | **阶段 Gate P6**：两块板稳定互通 ≥1 小时无断链；能脱稿讲清自旋锁/绑核/卸载决策 |
+
+> **v2.0 说明**：原 D85「S3 上手」删除（S3 已是主线板）；原 D87「PSRAM + 摄像头流水线」一分为二 —— PSRAM 归 D22、摄像头归 D18–D19；原 D88 的视觉推理基线已在 D19 建立，这里只做"拆核 vs 不拆核"。空出的两天由 D87/D88 回填（原 D18/D19 的内容）。
+
 
 ---
 
 ### W14 · D92–D98 ｜ P7 旗舰项目集成
 
 **旗舰项目**：**「低功耗多节点环境感知与声控边缘系统」**
-C3 传感节点（SHT30 + MPU6050 + 麦克风 + TinyML + deep sleep + ESP-NOW）→ C3/S3 网关（聚合 + 规则 + MQTT + OTA + Web 配置）→ PC 端 mosquitto + InfluxDB + Grafana。
+**ESP32-CAM 视觉/传感节点**（OV2640 + SHT30/MPU6050 + 麦克风 + TinyML + deep sleep + ESP-NOW）→ **S3 网关 + 本地推理**（聚合 + 规则 + MQTT + OTA + Web 配置）→ PC 端 mosquitto + InfluxDB + Grafana。
 
 | 天 | 主题 | 内容 | 🎯验收 |
 |---|---|---|---|
@@ -375,7 +380,7 @@ C3 传感节点（SHT30 + MPU6050 + 麦克风 + TinyML + deep sleep + ESP-NOW）
 | **D101** 周三 | ★ 简历项目提炼 | 用 STAR 写 3 条：①底层架构分析 ②TinyML 落地 ③可靠性设计 | 🎯 每条都有**可量化指标**（如"中断延迟从 12µs 降至 3.2µs"） |
 | **D102** 周四 | ★ 高频八股整理 | 100 题：C 语言 / RTOS / 驱动 / 总线协议 / 网络 / 底层 | `notes/interview.md`。🎯 自测答出 ≥80% |
 | **D103** 周五 | ★ 手写代码训练 | 环形缓冲、位图、状态机、CRC、单链表反转、`memcpy` 优化、字符串库 | 🎯 无编译警告 + 边界用例全过 |
-| **D104** 周六 | ★★ 模拟面试与演示 | 录 10min 项目演示；自问自答 20 问（为什么用 C3 不用 S3？为什么不用 FreeRTOS 的 xxx？） | 🎯 3 分钟内讲清架构与关键取舍 |
+| **D104** 周六 | ★★ 模拟面试与演示 | 录 10min 项目演示；自问自答 20 问（为什么 S3 当主线、ESP32-CAM 专做视觉？为什么不直接上 Linux？为什么不用 FreeRTOS 的 xxx？） | 🎯 3 分钟内讲清架构与关键取舍 |
 | **D105** 周日 | 复盘 + 博客 #15 | 《从学习到可入职：我给自己的验收标准》 | 🎯 博客公开发布 ≥8 篇 |
 
 ---
@@ -405,10 +410,10 @@ D106 用这张表自评（1–5 分，低于 4 分的进 D107–D109 补强清�
 | 3 | 能诊断任意崩溃：panic / coredump / WDT / 越界 / 栈溢出 → 定位到源码行 | D5, D24, D60 | 给一段坏代码盲定位 |
 | 4 | 讲清上电到 `app_main` 全链路；读链接脚本与 map；能预测变量落哪个段 | D50–D56 | 白板画图 + 现场预测验证 |
 | 5 | 用测量数据（周期/延迟分布/功耗）驱动优化，而不是靠猜 | D19, D47, D57–D59 | 每个优化结论都能拿出数据 |
-| 6 | C3 上完整 TinyML 流水线（采集→训练→量化→部署→调优），并说清能力边界 | D64–D77 | 现场换一个新传感器重做一遍 |
+| 6 | S3 上完整 TinyML 流水线（采集→训练→量化→部署→调优），并说清 PSRAM / PIE 的能力边界 | D64–D77 | 现场换一个新传感器重做一遍 |
 | 7 | 设计并交付多节点、断网可用、可 OTA 的边缘系统 | D78–D98 | 故障注入 10/10 通过 |
 | 8 | 能在 MCU 上实现并整定一个稳定闭环，且能说清定时抖动 / 积分饱和 / 微分噪声的处理 | D78–D81 | 温控或转速闭环阶跃响应达标（超调 <10%，稳态误差 <1%） |
-| 9 | 讲清 SMP 双核调度（绑核/自旋锁/核间通信/cache 一致性）与**异构任务卸载决策**（本地 vs 邻居 vs 云） | D86, D90 | 白板画双核任务图；用自测数据论证卸载与否 |
+| 9 | 讲清 SMP 双核调度（绑核/自旋锁/核间通信/cache 一致性）与**异构任务卸载决策**（本地 vs 邻居 vs 云） | D85, D90 | 白板画双核任务图；用自测数据论证卸载与否 |
 | 10 | 能写成文档讲给别人听，面试 3 分钟讲清架构与取舍 | D100–D105 | 模拟面试通过 |
 
 ---
@@ -430,13 +435,15 @@ c3-lab/
 │   ├─ gesture/  kws/  wakeword/  anomaly/
 │   └─ pc_train/          # train.py / preprocess.py / models/
 ├─ 60_edge/               # D78–D84（含 pid/）
-├─ 85_s3/                 # D85–D91
+├─ 80_cam/                # D18–D19 摄像头（ESP32-CAM，set-target esp32）
+├─ 85_s3/                 # D85–D91 双核 / SMP / 异构
 ├─ 90_flagship/           # D92–D98
 │   └─ DESIGN.md
 ├─ common_components/     # ★ 全程复用
 │   ├─ app_log/  frame_proto/  uart_pipe/  sht30/
 │   ├─ ssd1306/  ws2812/  cfg/  mqtt_client/
 │   ├─ net_check/  prof/  bus/  espnow_link/
+│   ├─ cam_service/  smp_probe/
 ├─ tools/                 # flash.ps1 / test_e2e.py / dataset_tool.py
 └─ notes/                 # 每日 Dxxx.md + arch-report.md + tinyml-selection.md + interview.md
 ```
@@ -448,11 +455,11 @@ c3-lab/
 | 全阶段示例库 | `$IDF_PATH/examples/` （get-started / peripherals / wifi / bluetooth / protocols / system / storage / provisioning） |
 | 组件注册表（一行引依赖） | `main/idf_component.yml` → `espressif/esp-tflite-micro`、`espressif/esp-sr`、`espressif/esp-dl`、`espressif/esp32-camera` |
 | 构建系统 | `$IDF_PATH/tools/cmake/project.cmake`、`components/*/CMakeLists.txt` |
-| 启动链源码 | `components/bootloader/bootloader_start.c`、`components/esp_system/port/cpu_start.c`、`components/esp_system/app_startup.c` |
-| 链接脚本 | `components/esp_system/ld/esp32c3/sections.ld.in`、`memory.ld.in` |
-| FreeRTOS 内核 | `components/freertos/FreeRTOS-Kernel/tasks.c`、`queue.c`、`portable/riscv/port.c` |
+| 启动链源码 | `components/bootloader/bootloader_start.c`、`components/esp_system/port/cpu_start.c`（**CPU1 在 `start_other_core` 里被拉起**）、`components/esp_system/app_startup.c` |
+| 链接脚本 | `components/esp_system/ld/esp32s3/sections.ld.in`、`memory.ld.in` |
+| FreeRTOS 内核 | `components/freertos/FreeRTOS-Kernel/tasks.c`、`queue.c`、`portable/xtensa/port.c` |
 | 测试框架 | `components/unity`、`pytest-embedded`（`idf.py -T`） |
-| 目标芯片手册 | ESP32-C3 技术参考手册（Memory Map / Interrupt / Cache 章节）、数据手册 |
+| 目标芯片手册 | ESP32-S3 技术参考手册（Memory Map / 中断异常 / Cache / PSRAM）、ESP32-S3 数据手册、OV2640 数据手册 |
 
 ---
 
@@ -467,7 +474,7 @@ c3-lab/
 | **阶段 Gate P3** | D49 | 10 个 RTOS 面试题能用自测数据答 |
 | **阶段 Gate P4** | D63 | 10 页底层报告完成，能预测变量落段 3/3 |
 | **阶段 Gate P5** | D77 | 3 个模型全板载可跑 + 能力边界报告 |
-| **阶段 Gate P6** | D91 | C3↔S3 稳定互通 1h；双核加速比与卸载决策有量化结论 |
+| **阶段 Gate P6** | D91 | S3 ↔ ESP32-CAM 稳定互通 1h；双核加速比与卸载决策有量化结论 |
 | **最终 Gate** | D98 | 故障注入 10/10 通过；干净 clone 一条命令构建 |
 | **求职 Gate** | D105 | 简历 3 条 STAR 有量化指标；八股自测 ≥80%；3min 讲清架构 |
 
@@ -478,9 +485,9 @@ c3-lab/
 | 风险 | 概率 | 应对 |
 |---|---|---|
 | 每日 2h 不够，普遍延期 | **高** | 16 个周日全是缓冲；☆ 任务可弃；每阶段末有 Gate 但允许"降级通过"（少做 1 个延伸任务） |
-| 硬件到货慢（传感器/摄像头） | 中 | 到货前跳过对应天，先做 D50+ 的纯软件底层章节（不依赖外设） |
+| 硬件缺失（如 USB-TTL 没到 / 摄像头坏） | 中 | **USB-TTL 是 D18 的硬前置**，先用 S3 把 D1–D17 跑完（不依赖摄像头）；摄像头坏了就先做 D20–D28 的驱动与内存实验，D18–D19 顺延到下一个周日 |
 | TinyML 效果不达标（准确率低） | 中 | 降级路径：① 改用 Edge Impulse 现成流程 ② 退化到"二分类 + 阈值"方案 ③ 把"做不出来的原因分析"本身写成博客（面试同样是加分） |
-| C3 上 ESP-SR 跑不起来 | 低-中 | 已验证 `WakeNet9s/10s` 支持 C3；若仍失败，退回 D73 自训 KWS |
+| ESP-SR 唤醒词效果不达标 | 低-中 | S3 支持满血 WakeNet，仍有问题就退回 D73 自训 KWS，并把"为什么官方方案不合适"写成博客 |
 | 被八股分散注意力，工程烂尾 | **高** | 八股只在 D102 集中处理；其余时间**禁止刷题**，只能写代码 |
 | 陷入"完美主义重构" | 中 | 组件只允许在当前阶段内重构；过 Gate 后冻结接口，只加不改 |
 
@@ -488,16 +495,17 @@ c3-lab/
 
 ## 十、参考来源（已核实）
 
-1. ESP-SR 组件 README（`WakeNet9s` 支持 C3/C5，`WakeNet10s` 支持无 PIE 芯片）
+1. ESP-IDF 编程指南（**ESP32-S3 版**：构建系统、分区表、OTA、FreeRTOS/SMP、性能分析、PSRAM）
+   https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32s3/
+2. ESP32-S3 技术参考手册（Memory Map / 中断与异常 / Cache / PSRAM 章节）
+   https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_cn.pdf
+3. `esp32-camera` 组件（OV2640 驱动、帧缓存与帧率配置；**经典 ESP32 走 I2S 并口，S3 走 LCD_CAM**）
+   https://components.espressif.com/components/espressif/esp32-camera
+   https://github.com/espressif/esp32-camera/blob/master/README.md
+4. ESP32-CAM（AI-Thinker）烧录方式：**无板载 USB 转串口**，GPIO0 接地后复位进下载模式（引脚占用表见 `notes/D018.md`）
+   https://docs.espressif.com/projects/esptool/en/latest/esp32/advanced-topics/boot-mode-selection.html
+5. ESP-SR 组件 README（WakeNet 芯片支持矩阵；S3 用满血模型）
    https://components.espressif.com/components/espressif/esp-sr
-2. WakeNet 模型与芯片支持表（WakeNet9s 支持 ESP32C3/C5/C6）
-   https://docs.espressif.com/projects/esp-sr/zh_CN/latest/esp32/wake_word_engine/README.html
-3. ESP-DL 快速入门（"ESP32-C3 仅适用于无需 PSRAM 的应用"）
-   https://docs.espressif.com/projects/esp-dl/zh_CN/release-v1.1/esp32/get-started.html
-4. ESP32-C3 技术参考手册 / 数据手册（400KB SRAM、RV32IMC、无 PSRAM、BLE5 LE-only）
-   https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32c3/
-5. ESP-IDF 编程指南（构建系统、分区表、OTA、FreeRTOS、性能分析）
-   https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32c3/
 6. `esp-tflite-micro` 组件 https://components.espressif.com/components/espressif/esp-tflite-micro
 
 ---
@@ -509,4 +517,5 @@ $HOME\esp\esp-idf\export.ps1
 idf.py --version                    # 期望 v5.x
 python --version                    # 期望 3.8+
 New-Item -ItemType Directory E:\c3-lab -Force; cd E:\c3-lab; git init
+idf.py set-target esp32s3           # 主线板（ESP32-CAM 的工程单独 set-target esp32）
 ```

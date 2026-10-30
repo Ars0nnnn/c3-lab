@@ -4,6 +4,6 @@
 version = 1
 firmware = 'build/flasher_args.json'
 elf = 'build/gpio_driver.elf'
-gdbServerPort = 3333
+gdbServerPort = 3333   # 任务：写了这一行 wokwi-cli 会"暂停等 gdb 连接"，命令行跑仿真时必须注释掉
 #env:WOKWI_CLI_TOKEN="wok_q2zv8cgLUovhazd9ZxAUxJ0HtjuF3aOee2456252" 
 #C:\Users\arson\.wokwi\bin\wokwi-cli.exe 

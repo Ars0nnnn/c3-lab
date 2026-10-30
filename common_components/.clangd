@@ -20,11 +20,21 @@ CompileFlags:
         - C:/Espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/15.2.0/include
         - -isystem
         - C:/Espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/15.2.0/include-fixed
+        - -isystem
+        - C:/esp/v6.1/esp-idf/components/esp_common/include
+        - -isystem
+        - C:/esp/v6.1/esp-idf/components/esp_hw_support/include
+        - -isystem
+        - C:/esp/v6.1/esp-idf/components/soc/esp32s3/include
         # --- 本仓库组件（等价于组件的 INCLUDE_DIRS） ---
         - -I
         - E:/c3-lab/common_components/c3lab_mmio/include
         - -I
         - E:/c3-lab/common_components/c3lab_gpio/include
+        - -I
+        - E:/c3-lab/common_components/c3lab_intr/include
+        - -I
+        - E:/c3-lab/common_components/c3lab_timer/include
         - -I
         - E:/c3-lab/10_drivers/gpio_driver/build/config
         # --- 语言模式（对齐 IDF：gnu++26 / 无异常 / 无 RTTI） ---
