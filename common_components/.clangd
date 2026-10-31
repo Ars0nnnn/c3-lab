@@ -26,6 +26,20 @@ CompileFlags:
         - C:/esp/v6.1/esp-idf/components/esp_hw_support/include
         - -isystem
         - C:/esp/v6.1/esp-idf/components/soc/esp32s3/include
+        - -isystem
+        - C:/esp/v6.1/esp-idf/components/esp_driver_ledc/include
+        - -isystem
+        - C:\esp\v6.1\esp-idf\components\esp_hw_support\etm\include
+        - -isystem
+        - C:\esp\v6.1\esp-idf\components\hal\include
+        - -isystem
+        - C:\esp\v6.1\esp-idf\components\esp_hal_ledc\include
+        - -isystem
+        - C:\esp\v6.1\esp-idf\components\soc\esp32s3\register
+        - -isystem
+        - C:\esp\v6.1\esp-idf\components\log\include
+        - -isystem
+        - C:\esp\v6.1\esp-idf\components\esp_rom\include
         # --- 本仓库组件（等价于组件的 INCLUDE_DIRS） ---
         - -I
         - E:/c3-lab/common_components/c3lab_mmio/include

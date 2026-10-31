@@ -16,32 +16,24 @@
 
 namespace c3lab {
 
-// ============================================================================
-// pin_id：强类型引脚号
-// ----------------------------------------------------------------------------
-// 用 struct + 显式构造，而不是裸 uint8_t：
-//   · 防"把 10 当成延时毫秒数"传错（编译期就报错）
-//   · 无隐式转换 → 不会把 -1 变成 255
-//   · 满足 C++20 structural type 要求 → 可以直接当模板参数（见 fixed_pin）
-// ============================================================================
 struct pin_id {
-  std::uint8_t n;
+    std::uint8_t n;
 
-  constexpr explicit pin_id(std::uint8_t p) noexcept : n{p} {}
+    constexpr explicit pin_id(std::uint8_t p) noexcept : n{p} {}
 
-  [[nodiscard]] constexpr std::uint8_t value() const noexcept { return n; }
-  [[nodiscard]] constexpr std::uint32_t mask() const noexcept {
-    return mmio::bit(n);
-  }
-  [[nodiscard]] constexpr bool high_bank() const noexcept {
-    return n >= 32u;
-  } // S3 有 GPIO32..48
-  [[nodiscard]] constexpr bool valid() const noexcept { return n < 49u; }
+    [[nodiscard]] constexpr std::uint8_t value() const noexcept { return n; }
+    [[nodiscard]] constexpr std::uint32_t mask() const noexcept {
+        return mmio::bit(n);
+    }
+    [[nodiscard]] constexpr bool high_bank() const noexcept {
+        return n >= 32u;
+    } // S3 有 GPIO32..48
+    [[nodiscard]] constexpr bool valid() const noexcept { return n < 49u; }
 };
 
 // 用户自定义字面量：4_pin / 10_pin / 48_pin
 consteval pin_id operator""_pin(unsigned long long v) noexcept {
-  return pin_id{static_cast<std::uint8_t>(v)};
+    return pin_id{static_cast<std::uint8_t>(v)};
 }
 
 static_assert((4_pin).value() == 4);
@@ -54,12 +46,12 @@ namespace gpio {
 // 中断触发类型（值与 GPIO_INTR_* 一致）
 // ============================================================================
 enum class edge : std::uint8_t {
-  disable = 0,
-  posedge = 1,
-  negedge = 2,
-  anyedge = 3,
-  level_low = 4,
-  level_high = 5,
+    disable = 0,
+    posedge = 1,
+    negedge = 2,
+    anyedge = 3,
+    level_low = 4,
+    level_high = 5,
 };
 
 // GPIO.pin[n] 寄存器位域（见 soc/gpio_struct.h）
@@ -74,112 +66,115 @@ inline constexpr std::uint32_t pad_driver_bit = 1u << 2; // 开漏
 // ============================================================================
 // 方向：输出使能在 GPIO 外设（bank0/bank1 分开），输入使能在 IO_MUX 的 FUN_IE
 inline void set_output_enable(pin_id p, bool en) noexcept {
-  if (p.high_bank()) {
-    mmio::write_at(en ? gpio_regs::enable1_w1ts() : gpio_regs::enable1_w1tc(),
-                   p.mask());
-  } else {
-    mmio::write_at(en ? gpio_regs::enable_w1ts() : gpio_regs::enable_w1tc(),
-                   p.mask());
-  }
+    if (p.high_bank()) {
+        mmio::write_at(en ? gpio_regs::enable1_w1ts()
+                          : gpio_regs::enable1_w1tc(),
+                       p.mask());
+    } else {
+        mmio::write_at(en ? gpio_regs::enable_w1ts() : gpio_regs::enable_w1tc(),
+                       p.mask());
+    }
 }
 
 inline void func_gpio(pin_id p) noexcept {
-  mmio::update_field_at(gpio_regs::iomux(p.value()), gpio_regs::mcu_sel_mask,
-                        gpio_regs::mcu_sel_gpio);
+    mmio::update_field_at(gpio_regs::iomux(p.value()), gpio_regs::mcu_sel_mask,
+                          gpio_regs::mcu_sel_gpio);
 }
 
 // ============================================================================
 // 配置（等价于 gpio_config，但是寄存器直写、无动态分配）
 // ============================================================================
 inline void input_pullup(pin_id p) noexcept {
-  mmio::write_at(gpio_regs::iomux(p.value()), gpio_regs::mcu_sel_gpio |
-                                                  gpio_regs::fun_ie |
-                                                  gpio_regs::fun_pu);
-  set_output_enable(p, false);
-  mmio::update_field_at(gpio_regs::pin_conf(p.value()), intr_type_mask, 0);
+    mmio::write_at(gpio_regs::iomux(p.value()), gpio_regs::mcu_sel_gpio |
+                                                    gpio_regs::fun_ie |
+                                                    gpio_regs::fun_pu);
+    set_output_enable(p, false);
+    mmio::update_field_at(gpio_regs::pin_conf(p.value()), intr_type_mask, 0);
 }
 
 inline void input_float(pin_id p) noexcept {
-  mmio::write_at(gpio_regs::iomux(p.value()),
-                 gpio_regs::mcu_sel_gpio | gpio_regs::fun_ie);
-  set_output_enable(p, false);
+    mmio::write_at(gpio_regs::iomux(p.value()),
+                   gpio_regs::mcu_sel_gpio | gpio_regs::fun_ie);
+    set_output_enable(p, false);
 }
 
 inline void output(pin_id p, bool initial = false) noexcept {
-  // 纯输出：不留输入缓冲、不上拉（否则 220Ω 上白灌电流）
-  mmio::update_field_at(gpio_regs::iomux(p.value()),
-                        gpio_regs::mcu_sel_mask | gpio_regs::fun_ie |
-                            gpio_regs::fun_pu | gpio_regs::fun_pd,
-                        gpio_regs::mcu_sel_gpio);
-  // 先定电平，再开输出使能 —— 避免上电瞬间闪一下
-  mmio::write_at(initial ? gpio_regs::out_w1ts() : gpio_regs::out_w1tc(),
-                 p.mask());
-  set_output_enable(p, true);
+    // 纯输出：不留输入缓冲、不上拉（否则 220Ω 上白灌电流）
+    mmio::update_field_at(gpio_regs::iomux(p.value()),
+                          gpio_regs::mcu_sel_mask | gpio_regs::fun_ie |
+                              gpio_regs::fun_pu | gpio_regs::fun_pd,
+                          gpio_regs::mcu_sel_gpio);
+    // 先定电平，再开输出使能 —— 避免上电瞬间闪一下
+    mmio::write_at(initial ? gpio_regs::out_w1ts() : gpio_regs::out_w1tc(),
+                   p.mask());
+    set_output_enable(p, true);
 }
 
 inline void open_drain(pin_id p) noexcept {
-  output(p);
-  mmio::set_bits_at(gpio_regs::pin_conf(p.value()), pad_driver_bit);
+    output(p);
+    mmio::set_bits_at(gpio_regs::pin_conf(p.value()), pad_driver_bit);
 }
 
 // ============================================================================
 // 输出 / 输入（W1TS、W1TC 是原子的，可以从中断里调）
 // ============================================================================
 inline void high(pin_id p) noexcept {
-  mmio::write_at(p.high_bank() ? gpio_regs::out1_w1ts() : gpio_regs::out_w1ts(),
-                 p.mask());
+    mmio::write_at(p.high_bank() ? gpio_regs::out1_w1ts()
+                                 : gpio_regs::out_w1ts(),
+                   p.mask());
 }
 
 inline void low(pin_id p) noexcept {
-  mmio::write_at(p.high_bank() ? gpio_regs::out1_w1tc() : gpio_regs::out_w1tc(),
-                 p.mask());
+    mmio::write_at(p.high_bank() ? gpio_regs::out1_w1tc()
+                                 : gpio_regs::out_w1tc(),
+                   p.mask());
 }
 
 inline void set(pin_id p, bool level) noexcept {
-  if (level) {
-    high(p);
-  } else {
-    low(p);
-  }
+    if (level) {
+        high(p);
+    } else {
+        low(p);
+    }
 }
 
 inline void toggle(pin_id p) noexcept {
-  // 硬件没有"翻转"原语：先读整字输出寄存器，再走 W1TS/W1TC 写回
-  const std::uintptr_t word =
-      p.high_bank() ? gpio_regs::out1_reg() : gpio_regs::out_reg();
-  set(p, (mmio::read_at(word) & p.mask()) == 0u);
+    // 硬件没有"翻转"原语：先读整字输出寄存器，再走 W1TS/W1TC 写回
+    const std::uintptr_t word =
+        p.high_bank() ? gpio_regs::out1_reg() : gpio_regs::out_reg();
+    set(p, (mmio::read_at(word) & p.mask()) == 0u);
 }
 
 [[nodiscard]] inline bool level(pin_id p) noexcept {
-  const std::uintptr_t word =
-      p.high_bank() ? gpio_regs::in1_reg() : gpio_regs::in_reg();
-  return (mmio::read_at(word) & p.mask()) != 0u;
+    const std::uintptr_t word =
+        p.high_bank() ? gpio_regs::in1_reg() : gpio_regs::in_reg();
+    return (mmio::read_at(word) & p.mask()) != 0u;
 }
 
 // ============================================================================
 // 中断：类型 + 使能 + 清状态（三步，缺一不可）
 // ============================================================================
 inline void set_intr(pin_id p, edge e) noexcept {
-  mmio::update_field_at(gpio_regs::pin_conf(p.value()), intr_type_mask,
-                        static_cast<std::uint32_t>(e) << 7);
+    mmio::update_field_at(gpio_regs::pin_conf(p.value()), intr_type_mask,
+                          static_cast<std::uint32_t>(e) << 7);
 }
 
 inline void enable_intr(pin_id p, bool en) noexcept {
-  mmio::update_field_at(gpio_regs::pin_conf(p.value()), intr_ena_bit,
-                        en ? intr_ena_bit : 0u);
+    mmio::update_field_at(gpio_regs::pin_conf(p.value()), intr_ena_bit,
+                          en ? intr_ena_bit : 0u);
 }
 
 // ⚠️ 手写寄存器时最容易忘的一步：不清状态 → ISR 反复进入
 inline void clear_intr(pin_id p) noexcept {
-  mmio::write_at(p.high_bank() ? gpio_regs::status1_w1tc()
-                               : gpio_regs::status_w1tc(),
-                 p.mask());
+    mmio::write_at(p.high_bank() ? gpio_regs::status1_w1tc()
+                                 : gpio_regs::status_w1tc(),
+                   p.mask());
 }
 
 [[nodiscard]] inline bool intr_pending(pin_id p) noexcept {
-  const std::uintptr_t word =
-      p.high_bank() ? gpio_regs::status1_reg() : gpio_regs::status_reg();
-  return (mmio::read_at(word) & p.mask()) != 0u;
+    const std::uintptr_t word =
+        p.high_bank() ? gpio_regs::status1_reg() : gpio_regs::status_reg();
+    return (mmio::read_at(word) & p.mask()) != 0u;
 }
 
 // ============================================================================
@@ -190,62 +185,43 @@ inline void clear_intr(pin_id p) noexcept {
 // reg32<Addr> 模板。
 // ============================================================================
 template <const pin_id P> struct fixed_pin {
-  static constexpr std::uint8_t n = P.value();
-  static constexpr std::uint32_t m = P.mask();
-  static constexpr bool hi = P.high_bank();
+    // static constexpr std::uint8_t n = P.value();
+    // static constexpr std::uint32_t m = P.mask();
+    // static constexpr bool hi = P.high_bank();
 
-  static void high() noexcept {
-    if constexpr (hi) {
-      mmio::reg32<gpio_regs::out1_w1ts()>::write(m);
-    } else {
-      mmio::reg32<gpio_regs::out_w1ts()>::write(m);
+    static inline constexpr std::uint32_t mask() noexcept { return P.mask(); }
+
+    static inline void high() noexcept {
+        if constexpr (P.high_bank()) {
+            mmio::reg32<gpio_regs::out1_w1ts()>::write(P.mask());
+        } else {
+            mmio::reg32<gpio_regs::out_w1ts()>::write(P.mask());
+        }
     }
-  }
 
-  static void low() noexcept {
-    if constexpr (hi) {
-      mmio::reg32<gpio_regs::out1_w1tc()>::write(m);
-    } else {
-      mmio::reg32<gpio_regs::out_w1tc()>::write(m);
+    static inline void low() noexcept {
+        if constexpr (P.high_bank()) {
+            mmio::reg32<gpio_regs::out1_w1tc()>::write(P.mask());
+        } else {
+            mmio::reg32<gpio_regs::out_w1tc()>::write(P.mask());
+        }
     }
-  }
 
-  static void set(bool v) noexcept {
-    if (v) {
-      high();
-    } else {
-      low();
+    static inline void set(bool v) noexcept {
+        if (v) {
+            high();
+        } else {
+            low();
+        }
     }
-  }
 
-  [[nodiscard]] static bool level() noexcept {
-    if constexpr (hi) {
-      return (mmio::reg32<gpio_regs::in1_reg()>::read() & m) != 0u;
-    } else {
-      return (mmio::reg32<gpio_regs::in_reg()>::read() & m) != 0u;
+    [[nodiscard]] static inline constexpr bool level() noexcept {
+        if constexpr (P.high_bank()) {
+            return (mmio::reg32<gpio_regs::in1_reg()>::read() & P.mask()) != 0u;
+        } else {
+            return (mmio::reg32<gpio_regs::in_reg()>::read() & P.mask()) != 0u;
+        }
     }
-  }
-};
-
-template <std::size_t I, typename... Ts> struct nth_type;
-template <typename T, typename... Ts> struct nth_type<0, T, Ts...> {
-  using type = T;
-};
-template <std::size_t I, typename T, typename... Ts>
-struct nth_type<I, T, Ts...> : nth_type<I - 1, Ts...> {}; // 剥掉第一个再找 I-1
-
-template <typename... Ps> struct pin_list {
-
-  static constexpr std::size_t size = sizeof...(Ps);
-  // 取单个引脚：kBtnc::at<0> 就是 fixed_pin<4_pin>（I 必须是编译期常量）
-  template <std::size_t I> using at = typename nth_type<I, Ps...>::type;
-
-  static void high_all() noexcept { (Ps::high(), ...); } // C++17 折叠表达式
-  static void low_all() noexcept { (Ps::low(), ...); }
-  static void set_all(bool v) noexcept { (Ps::set(v), ...); }
-  [[nodiscard]] static bool all_level() noexcept {
-    return (... && Ps::level()); // 全部高才算高
-  };
 };
 
 } // namespace gpio
